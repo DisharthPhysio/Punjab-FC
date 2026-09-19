@@ -1,0 +1,165 @@
+{
+  "project_name": "Athlete Wellness & Load Check-In System",
+  "design_archetype": "Archetype 2: The Performance Pro (Tactical Athletic Precision)",
+  "app_type": "hybrid_fullstack",
+  "file_type_instruction": "All component files in this repository are JavaScript (.js / .jsx), NOT TypeScript (.tsx). Use prop validation or default standard React JavaScript patterns.",
+  "theme_strategy": "High-contrast athletic command center theme with support for Dark Mode (Slate Obsidian #0B0F17 background) and Light Mode (Clean Warm Off-White #F8FAFC background). Features traffic-light status highlighting for rapid roster triage.",
+  "colors": {
+    "background_dark": "#0B0F17",
+    "background_light": "#F8FAFC",
+    "surface_dark": "#161C28",
+    "surface_light": "#FFFFFF",
+    "surface_border_dark": "rgba(255, 255, 255, 0.1)",
+    "surface_border_light": "rgba(15, 23, 42, 0.08)",
+    "primary_kinetic": "#10B981",
+    "primary_kinetic_hover": "#059669",
+    "accent_electric_red": "#EF4444",
+    "accent_warning_amber": "#F59E0B",
+    "accent_info_blue": "#3B82F6",
+    "status_traffic_lights": {
+      "green_good": {
+        "bg": "bg-emerald-500/15 dark:bg-emerald-950/40",
+        "text": "text-emerald-700 dark:text-emerald-400",
+        "border": "border-emerald-500/30",
+        "indicator": "#10B981",
+        "label": "Good / Low Risk"
+      },
+      "amber_watch": {
+        "bg": "bg-amber-500/15 dark:bg-amber-950/40",
+        "text": "text-amber-700 dark:text-amber-400",
+        "border": "border-amber-500/30",
+        "indicator": "#F59E0B",
+        "label": "Watch / Moderate Load"
+      },
+      "red_followup": {
+        "bg": "bg-rose-500/15 dark:bg-rose-950/40",
+        "text": "text-rose-700 dark:text-rose-400",
+        "border": "border-rose-500/30",
+        "indicator": "#EF4444",
+        "label": "Follow-Up / High Risk"
+      },
+      "grey_not_checked": {
+        "bg": "bg-slate-500/10 dark:bg-slate-800/40",
+        "text": "text-slate-500 dark:text-slate-400",
+        "border": "border-slate-300 dark:border-slate-700",
+        "indicator": "#64748B",
+        "label": "Pending Check-In"
+      }
+    },
+    "text_dark": {
+      "heading": "#F8FAFC",
+      "body": "#94A3B8",
+      "muted": "#64748B"
+    },
+    "text_light": {
+      "heading": "#0F172A",
+      "body": "#334155",
+      "muted": "#64748B"
+    }
+  },
+  "typography": {
+    "headings": {
+      "family": "'Barlow Condensed', 'Outfit', 'Inter', sans-serif",
+      "weights": "font-bold font-extrabold uppercase tracking-wide",
+      "h1": "text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight",
+      "h2": "text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight",
+      "h3": "text-lg sm:text-xl font-bold",
+      "h4": "text-base sm:text-lg font-semibold"
+    },
+    "body": {
+      "family": "'Inter', '-apple-system', sans-serif",
+      "sizes": {
+        "large": "text-base sm:text-lg",
+        "default": "text-sm sm:text-base",
+        "small": "text-xs sm:text-sm",
+        "tiny": "text-xs font-mono"
+      }
+    }
+  },
+  "spacing_and_layout": {
+    "athlete_checkin_flow": "Mobile-first single column optimized layout (max-w-xl mx-auto). Large touch targets (minimum 48px height for buttons and rating pills). Generous spacing between wellness sections (py-8, gap-6).",
+    "coach_dashboard": "High-density tactical grid (grid-cols-1 lg:grid-cols-12 gap-6). Header with quick status summary counters (Total Athletes, Checked In %, Follow-ups Needed, High Load Alert). Full width responsive Squad Status Table with sticky athlete name column.",
+    "bento_widgets": {
+      "summary_cards": "col-span-full sm:col-span-6 lg:col-span-3",
+      "main_squad_table": "col-span-full lg:col-span-12",
+      "trend_chart": "col-span-full lg:col-span-8",
+      "roster_quick_manage": "col-span-full lg:col-span-4"
+    }
+  },
+  "component_guidelines": {
+    "WellnessRatingSelector": {
+      "description": "5-point scale rating control with visual color feedback (1=Poor/Severe to 5=Excellent/Optimal). Uses pill-shaped buttons with active ring highlights and icons.",
+      "accessibility": "Full keyboard focus,aria-pressed, and data-testid attributes per score pill."
+    },
+    "TrafficLightBadge": {
+      "description": "Visual indicator tag with background tint, solid dot indicator, and clear text label for Sleep, Hydration, Motivation, Illness, Soreness, and Load.",
+      "style": "px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 border"
+    },
+    "SquadStatusTable": {
+      "description": "Interactive data table highlighting today's athlete status with quick search, filter by readiness (All, Red Alert, Amber Watch, Pending), and click-to-view detailed athlete card.",
+      "features": ["Sortable columns", "Cell status color fill", "Export to Excel button", "Quick notes popover"]
+    },
+    "SorenessBodyMap": {
+      "description": "Visual or interactive checklist for muscle soreness areas (Lower Back, Hamstrings, Quadriceps, Calves, Shoulders, Knees, Ankle/Foot, Upper Back/Neck) with severity slider (1-5).",
+      "style": "Grid of body region badges with interactive intensity selectors"
+    },
+    "RPELoadCalculator": {
+      "description": "Computes Session Training Load automatically: Load = Session RPE (1-10 scale) x Duration (minutes). Display live calculated workload value with acute load zone badge (Low <300, Moderate 300-600, High >600).",
+      "style": "Live numeric counter with color-coded gauge ring or workload progress bar"
+    }
+  },
+  "testing_requirements": {
+    "data_testid_policy": "MANDATORY: Every input, button, select, card, table row, tab, modal trigger, filter, and action element MUST contain explicit data-testid attributes formatted in kebab-case.",
+    "key_test_ids": [
+      "athlete-select-dropdown",
+      "sleep-rating-5",
+      "sleep-notes-input",
+      "hydration-rating-4",
+      "motivation-rating-5",
+      "illness-toggle-switch",
+      "illness-symptoms-input",
+      "illness-severity-select",
+      "illness-temperature-input",
+      "soreness-toggle-switch",
+      "soreness-area-hamstring",
+      "soreness-severity-slider",
+      "session-type-input",
+      "rpe-score-selector-8",
+      "session-duration-input",
+      "calculated-training-load",
+      "submit-checkin-button",
+      "coach-login-password-input",
+      "coach-login-submit-button",
+      "squad-status-table",
+      "athlete-status-row-{id}",
+      "filter-status-red",
+      "filter-status-all",
+      "export-excel-button",
+      "add-athlete-input",
+      "add-athlete-button",
+      "remove-athlete-button-{id}",
+      "theme-toggle-button"
+    ]
+  },
+  "image_urls": {
+    "athlete_hero_banner": "https://images.unsplash.com/photo-1758922769578-68c5ba000d87?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwxfHxydW5uZXIlMjBhdGhsZXRlJTIwcG9ydHJhaXQlMjBmb2N1cyUyMHRyYWNrfGVufDB8fHx8MTc4OTcwOTA2Mnww&ixlib=rb-4.1.0&q=85",
+    "athlete_gym_workout": "https://images.unsplash.com/photo-1641337221253-fdc7237f6b61?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2Mzl8MHwxfHNlYXJjaHszfHxhdGhsZXRlJTIwdHJhaW5pbmclMjBzcG9ydHMlMjBneW0lMjBjaGVja2luJTIwd29ya291dHxlbnwwfHx8fDE3ODk3MDkwNTZ8MA&ixlib=rb-4.1.0&q=85",
+    "athlete_barbell_training": "https://images.unsplash.com/photo-1722925541142-5db2668ca492?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2Mzl8MHwxfHNlYXJjaHwxfHxhdGhsZXRlJTIwdHJhaW5pbmclMjBzcG9ydHMlMjBneW0lMjBjaGVja2luJTIwd29ya291dHxlbnwwfHx8fDE3ODk3MDkwNTZ8MA&ixlib=rb-4.1.0&q=85",
+    "athlete_focused_portrait": "https://images.pexels.com/photos/20259795/pexels-photo-20259795.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  },
+  "motion_and_microinteractions": {
+    "framer_motion_transitions": "Smooth accordion reveals for Illness details and Soreness sections. Staggered fade-in for Squad Status table rows. Subtle scaling scale-95 on click for rating buttons.",
+    "hover_states": "All hover states must explicitly specify text color to prevent invisible contrast (e.g. hover:bg-emerald-600 hover:text-white).",
+    "toast_notifications": "Use sonner for instant feedback on check-in submission, athlete additions/removals, and Excel data download."
+  },
+  "instructions_to_main_agent": [
+    "Build the app with clean React components in .js format under /app/frontend/src/.",
+    "Provide a toggle or header switch between 'Athlete Daily Check-In' (public mobile view) and 'Coach Command Center' (password protected).",
+    "Implement the full Athlete Daily Check-In form with sleep, hydration, motivation ratings, illness details, muscle soreness details, and session RPE load calculator.",
+    "Implement the Squad Status table on the Coach Dashboard with traffic-light cell background indicators (Green, Amber, Red, Grey) as specified.",
+    "Include Roster Management to dynamically add/remove team athletes.",
+    "Provide Excel export functionality (using xlsx library or standard CSV/Excel format download).",
+    "Store data cleanly via backend FastAPI endpoints or client-side mock persistence with clear API models so no mock data is lost on submit.",
+    "Ensure data-testid attributes exist on all interactive components per the testing guidelines."
+  ]
+}
