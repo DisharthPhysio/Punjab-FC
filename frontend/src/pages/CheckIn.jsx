@@ -15,7 +15,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const SYMPTOMS = ["Sore throat", "Cough", "Fever", "Runny nose", "Headache", "Fatigue", "Stomach ache", "Constipation", "Diarrhea", "Body ache"];
-const SORENESS_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Knees", "Ankle / Foot", "Upper Back / Neck"];
+const SORENESS_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Gluteus", "Groin", "Upper Back / Neck"];
+const SORENESS_SIDES = ["Right", "Left", "Both"];
 const SESSION_TYPES = ["Field / Pitch", "Gym / Strength", "Conditioning", "Match / Game", "Recovery", "Skills"];
 const HERO = "https://images.unsplash.com/photo-1758922769578-68c5ba000d87?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwxfHxydW5uZXIlMjBhdGhsZXRlJTIwcG9ydHJhaXQlMjBmb2N1cyUyMHRyYWNrfGVufDB8fHx8MTc4OTcwOTA2Mnww&ixlib=rb-4.1.0&q=85";
 
@@ -53,10 +54,10 @@ export default function CheckIn() {
 
   const [hasSoreness, setHasSoreness] = useState(false);
   const [sorenessAreas, setSorenessAreas] = useState([]);
+  const [sorenessSide, setSorenessSide] = useState("");
   const [sorenessSeverity, setSorenessSeverity] = useState(3);
   const [sorenessNotes, setSorenessNotes] = useState("");
 
-  const [logSession, setLogSession] = useState(false);
   const [sessionType, setSessionType] = useState("");
   const [rpe, setRpe] = useState(0);
   const [duration, setDuration] = useState("");
@@ -66,7 +67,8 @@ export default function CheckIn() {
     api.get("/roster").then((res) => setRoster(res.data)).catch(() => {});
   }, []);
 
-  const load = rpe && duration ? Number(rpe) * Number(duration) : 0;
+  const durationMin = Math.round(Number(duration)) || 0;
+  const load = rpe && durationMin ? Number(rpe) * durationMin : 0;
   const loadZone = load > 600 ? { label: "High", cls: "text-rose-500" } : load >= 300 ? { label: "Moderate", cls: "text-amber-500" } : { label: "Low", cls: "text-emerald-500" };
 
   const toggleIn = (arr, setArr, val) =>
@@ -76,8 +78,9 @@ export default function CheckIn() {
     if (!name) return toast.error("Please select your name");
     if (!sleepQuality || !hydration || !motivation)
       return toast.error("Please rate sleep, hydration and motivation");
-    if (logSession && (!rpe || !duration))
-      return toast.error("Add RPE and duration for your session");
+    if (!sessionType) return toast.error("Select your previous session type");
+    if (!rpe) return toast.error("Select your previous session RPE");
+    if (durationMin < 1) return toast.error("Enter your previous session duration (minutes)");
 
     setSubmitting(true);
     try {
@@ -85,10 +88,10 @@ export default function CheckIn() {
         name, sleepQuality, sleepNotes, hydration, motivation,
         feelingIll, symptoms: feelingIll ? symptoms : [], illnessSeverity: feelingIll ? illnessSeverity : "",
         temperature: feelingIll ? temperature : "", illnessNotes: feelingIll ? illnessNotes : "",
-        sorenessAreas: hasSoreness ? sorenessAreas : [], sorenessSeverity: hasSoreness ? sorenessSeverity : 0,
+        sorenessAreas: hasSoreness ? sorenessAreas : [], sorenessSide: hasSoreness ? sorenessSide : "",
+        sorenessSeverity: hasSoreness ? sorenessSeverity : 0,
         sorenessNotes: hasSoreness ? sorenessNotes : "",
-        logSession, sessionType: logSession ? sessionType : "", rpe: logSession ? Number(rpe) : 0,
-        duration: logSession ? Number(duration) : 0, notes: logSession ? notes : "",
+        logSession: true, sessionType, rpe: Number(rpe), duration: durationMin, notes,
       };
       await api.post("/checkin", payload);
       setDone(true);
@@ -190,6 +193,53 @@ export default function CheckIn() {
           <WellnessRating value={motivation} onChange={setMotivation} testIdPrefix="motivation-rating" />
         </Section>
 
+        {/* Previous session (required) */}
+        <Section icon={Dumbbell} title="Training Session" subtitle="Log Previous session load">
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session type <span className="text-rose-500">*</span></p>
+              <Select value={sessionType} onValueChange={setSessionType}>
+                <SelectTrigger data-testid="session-type-input"><SelectValue placeholder="Select session type" /></SelectTrigger>
+                <SelectContent>
+                  {SESSION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session RPE (1 = easy · 10 = max effort) <span className="text-rose-500">*</span></p>
+              <div className="grid grid-cols-5 gap-2 sm:grid-cols-10">
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n} type="button" data-testid={`rpe-score-selector-${n}`}
+                    onClick={() => setRpe(n)}
+                    className={`h-11 rounded-lg border text-sm font-bold transition-all active:scale-95 ${
+                      rpe === n ? "border-primary bg-primary text-primary-foreground scale-105" : "border-border bg-secondary text-muted-foreground hover:text-foreground"
+                    }`}
+                  >{n}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Duration (minutes) <span className="text-rose-500">*</span></p>
+              <Input
+                data-testid="session-duration-input" type="number" inputMode="numeric" min={1} step={1} value={duration}
+                onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 75"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/50 px-4 py-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Training Load</p>
+                <p className={`font-mono text-2xl font-bold ${loadZone.cls}`} data-testid="calculated-training-load">{load}</p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${loadZone.cls} border-current`}>{loadZone.label}</span>
+            </div>
+            <Textarea
+              data-testid="session-notes-input" value={notes} onChange={(e) => setNotes(e.target.value)}
+              placeholder="Session notes (optional)" rows={2} className="resize-none"
+            />
+          </div>
+        </Section>
+
         {/* Illness */}
         <Section icon={ShieldAlert} title="Feeling unwell?" subtitle="Flag anything your medical team should know">
           <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
@@ -279,6 +329,26 @@ export default function CheckIn() {
                   })}
                 </div>
                 <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Side</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {SORENESS_SIDES.map((side) => {
+                      const active = sorenessSide === side;
+                      return (
+                        <button
+                          key={side} type="button" aria-pressed={active}
+                          data-testid={`soreness-side-${side}`}
+                          onClick={() => setSorenessSide(active ? "" : side)}
+                          className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+                            active ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {side}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
                   <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <span>Severity</span>
                     <span className="text-foreground">{sorenessSeverity}/5</span>
@@ -291,64 +361,6 @@ export default function CheckIn() {
                 <Textarea
                   data-testid="soreness-notes-input" value={sorenessNotes} onChange={(e) => setSorenessNotes(e.target.value)}
                   placeholder="Describe the soreness (optional)" rows={2} className="resize-none"
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </Section>
-
-        {/* Session RPE */}
-        <Section icon={Dumbbell} title="Training Session" subtitle="Log today's session load (optional)">
-          <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-            <span className="text-sm font-medium">I trained today</span>
-            <Switch data-testid="session-toggle-switch" checked={logSession} onCheckedChange={setLogSession} />
-          </div>
-          <AnimatePresence>
-            {logSession && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                className="mt-4 space-y-4 overflow-hidden"
-              >
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session type</p>
-                  <Select value={sessionType} onValueChange={setSessionType}>
-                    <SelectTrigger data-testid="session-type-input"><SelectValue placeholder="Select session type" /></SelectTrigger>
-                    <SelectContent>
-                      {SESSION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session RPE (1 = easy · 10 = max effort)</p>
-                  <div className="grid grid-cols-5 gap-2 sm:grid-cols-10">
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                      <button
-                        key={n} type="button" data-testid={`rpe-score-selector-${n}`}
-                        onClick={() => setRpe(n)}
-                        className={`h-11 rounded-lg border text-sm font-bold transition-all active:scale-95 ${
-                          rpe === n ? "border-primary bg-primary text-primary-foreground scale-105" : "border-border bg-secondary text-muted-foreground hover:text-foreground"
-                        }`}
-                      >{n}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Duration (minutes)</p>
-                  <Input
-                    data-testid="session-duration-input" type="number" value={duration}
-                    onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 75"
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/50 px-4 py-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Training Load</p>
-                    <p className={`font-mono text-2xl font-bold ${loadZone.cls}`} data-testid="calculated-training-load">{load}</p>
-                  </div>
-                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${loadZone.cls} border-current`}>{loadZone.label}</span>
-                </div>
-                <Textarea
-                  data-testid="session-notes-input" value={notes} onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Session notes (optional)" rows={2} className="resize-none"
                 />
               </motion.div>
             )}

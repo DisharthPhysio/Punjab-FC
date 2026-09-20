@@ -389,7 +389,7 @@ export default function CoachDashboard() {
                     </td>
                     <td className={`px-4 py-3 ${CELL_BG[sorenessStatus(a.sorenessAreas, a.sorenessSeverity)]}`}>
                       {a.sorenessAreas && a.sorenessAreas.length > 0 ? (
-                        <span className="text-xs">{a.sorenessAreas.join(", ")} <span className="text-muted-foreground">({a.sorenessSeverity}/5)</span></span>
+                        <span className="text-xs">{a.sorenessAreas.join(", ")}{a.sorenessSide ? ` · ${a.sorenessSide}` : ""} <span className="text-muted-foreground">({a.sorenessSeverity}/5)</span></span>
                       ) : (
                         <span className="text-xs text-muted-foreground">None</span>
                       )}
