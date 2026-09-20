@@ -63,6 +63,17 @@ def today_str():
     return datetime.now(TZ).strftime('%Y-%m-%d')
 
 
+def parse_day(date_str: Optional[str]) -> Optional[str]:
+    """Validate an optional YYYY-MM-DD query parameter. Returns it unchanged, or None if not given."""
+    if not date_str:
+        return None
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD.")
+    return date_str
+
+
 FILLS = {
     "green": PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid"),
     "amber": PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid"),
@@ -197,7 +208,7 @@ async def notify_coach_alert(data: CheckInPayload, high_soreness: bool):
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">
       <div style="background:#0B0F17;color:#fff;padding:20px;border-radius:12px 12px 0 0;">
-        <h2 style="margin:0;color:#EF4444;">⚠️ Wellness Alert — {data.name}</h2>
+        <h2 style="margin:0;color:#EF4444;">⚠️ Load and Recovery Monitoring Alert — {data.name}</h2>
       </div>
       <div style="border:1px solid #eee;border-top:none;padding:20px;border-radius:0 0 12px 12px;">
         <p>{data.name} just submitted a check-in flagged for follow-up:</p>
@@ -209,10 +220,10 @@ async def notify_coach_alert(data: CheckInPayload, high_soreness: bool):
           <tr><td style="padding:6px 0;color:#888;">Soreness areas</td><td>{', '.join(data.sorenessAreas) or '—'}</td></tr>
           <tr><td style="padding:6px 0;color:#888;">Soreness notes</td><td>{data.sorenessNotes or '—'}</td></tr>
         </table>
-        <p style="color:#888;font-size:13px;">View the full squad status on your Coach Dashboard.</p>
+        <p style="color:#888;font-size:13px;">View the full squad status on your Medical Team Dashboard.</p>
       </div>
     </div>"""
-    await send_email(f"⚠️ Wellness alert — {data.name}", html)
+    await send_email(f"⚠️ Load and Recovery Monitoring alert — {data.name}", html)
 
 
 # ---------- Excel ----------
@@ -390,12 +401,14 @@ async def submit_checkin(data: CheckInPayload):
 
 
 # ---------- Dashboard Route ----------
-async def compute_acwr_map():
-    """Acute:Chronic Workload Ratio per athlete. acute=7-day avg daily load, chronic=28-day avg."""
-    today = datetime.now(TZ).date()
+async def compute_acwr_map(ref_day: Optional[str] = None):
+    """Acute:Chronic Workload Ratio per athlete. acute=7-day avg daily load, chronic=28-day avg.
+    Calculated as of ref_day (YYYY-MM-DD); defaults to today."""
+    today = datetime.strptime(ref_day, '%Y-%m-%d').date() if ref_day else datetime.now(TZ).date()
     start = (today - timedelta(days=27)).strftime('%Y-%m-%d')
+    end = today.strftime('%Y-%m-%d')
     acute_cut = (today - timedelta(days=6)).strftime('%Y-%m-%d')
-    sessions = await db.sessions.find({"date": {"$gte": start}}, {"_id": 0}).to_list(100000)
+    sessions = await db.sessions.find({"date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(100000)
     agg = {}
     for s in sessions:
         nm = s["name"]
@@ -421,8 +434,8 @@ async def compute_acwr_map():
     return result
 
 
-async def compute_dashboard():
-    d = today_str()
+async def compute_dashboard(day: Optional[str] = None):
+    d = day or today_str()
     roster = await db.roster.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
 
     dailies = await db.checkins.find({"date": d}, {"_id": 0}).sort("timestamp", 1).to_list(10000)
@@ -455,7 +468,7 @@ async def compute_dashboard():
     follow_ups = sum(1 for a in athletes if a["checkedIn"] and (a.get("feelingIll") or (a.get("sorenessSeverity") or 0) >= 4))
     high_load = sum(1 for a in athletes if (a.get("load") or 0) > 600)
 
-    acwr_map = await compute_acwr_map()
+    acwr_map = await compute_acwr_map(d)
     for a in athletes:
         m = acwr_map.get(a["name"], {"acwr": None, "risk": None})
         a["acwr"] = m["acwr"]
@@ -464,6 +477,7 @@ async def compute_dashboard():
 
     return {
         "date": d,
+        "today": today_str(),
         "summary": {"total": len(athletes), "checkedIn": checked_in, "followUps": follow_ups,
                     "highLoad": high_load, "loadSpikes": load_spikes},
         "athletes": athletes,
@@ -471,8 +485,8 @@ async def compute_dashboard():
 
 
 @api_router.get("/dashboard")
-async def dashboard(user: dict = Depends(get_current_user)):
-    return await compute_dashboard()
+async def dashboard(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    return await compute_dashboard(parse_day(date))
 
 
 @api_router.get("/trends")
@@ -500,10 +514,18 @@ async def trends(name: str, user: dict = Depends(get_current_user)):
     return {"name": name, "days": days}
 
 
+@api_router.get("/checkins/dates")
+async def checkin_dates(user: dict = Depends(get_current_user)):
+    """Days (YYYY-MM-DD) that have at least one response - used to mark the calendar."""
+    days = await db.checkins.distinct("date")
+    return {"dates": sorted(d for d in days if d)}
+
+
 @api_router.get("/checkins")
-async def list_checkins(user: dict = Depends(get_current_user), limit: int = 200):
-    dailies = await db.checkins.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
-    sessions = await db.sessions.find({}, {"_id": 0}).to_list(100000)
+async def list_checkins(user: dict = Depends(get_current_user), limit: int = 200, date: Optional[str] = None):
+    q = {"date": parse_day(date)} if date else {}
+    dailies = await db.checkins.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    sessions = await db.sessions.find(q, {"_id": 0}).to_list(100000)
     smap = {(s["name"], s["timestamp"]): s for s in sessions}
     for c in dailies:
         s = smap.get((c.get("name"), c.get("timestamp")))
@@ -601,7 +623,7 @@ async def delete_checkin(checkin_id: str, user: dict = Depends(get_current_user)
 @api_router.get("/export/excel")
 async def export_excel(user: dict = Depends(get_current_user)):
     data = await build_workbook_bytes()
-    filename = f"Wellness Report - {today_str()}.xlsx"
+    filename = f"Load and Recovery Monitoring Report - {today_str()}.xlsx"
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -616,7 +638,7 @@ async def send_daily_report_email():
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">
       <div style="background:#0B0F17;color:#fff;padding:20px;border-radius:12px 12px 0 0;">
-        <h2 style="margin:0;color:#10B981;">Wellness &amp; Load Report</h2>
+        <h2 style="margin:0;color:#10B981;">Load and Recovery Monitoring Report</h2>
         <p style="margin:4px 0 0;color:#94A3B8;">{d}</p>
       </div>
       <div style="border:1px solid #eee;border-top:none;padding:20px;border-radius:0 0 12px 12px;color:#333;">
@@ -625,8 +647,8 @@ async def send_daily_report_email():
         <p style="color:#888;font-size:13px;">The full Excel workbook (color-coded Dashboard, Roster, Daily Check-Ins, RPE Log) is attached.</p>
       </div>
     </div>"""
-    attachments = [{"filename": f"Wellness Report - {d}.xlsx", "content": list(data)}]
-    return await send_email(f"Wellness & Load Report — {d}", html, attachments)
+    attachments = [{"filename": f"Load and Recovery Monitoring Report - {d}.xlsx", "content": list(data)}]
+    return await send_email(f"Load and Recovery Monitoring Report — {d}", html, attachments)
 
 
 @api_router.post("/reports/send-now")
@@ -752,7 +774,7 @@ async def send_weekly_digest_email():
       </div>
     </div>"""
     data = await build_workbook_bytes()
-    attachments = [{"filename": f"Wellness Report - {summary['end']}.xlsx", "content": list(data)}]
+    attachments = [{"filename": f"Load and Recovery Monitoring Report - {summary['end']}.xlsx", "content": list(data)}]
     return await send_email(f"Weekly Squad Digest — {summary['start']} to {summary['end']}", html, attachments)
 
 
