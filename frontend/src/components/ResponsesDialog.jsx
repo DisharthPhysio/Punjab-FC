@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
 import { Trash2, ClipboardList, AlertCircle, Pencil, Eraser } from "lucide-react";
 import api, { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ function fmt(ts) {
   }
 }
 
-export function ResponsesDialog({ open, onOpenChange, onChanged }) {
+export function ResponsesDialog({ open, onOpenChange, onChanged, date }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(null);
@@ -30,21 +31,21 @@ export function ResponsesDialog({ open, onOpenChange, onChanged }) {
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/checkins?limit=300");
+      const res = await api.get("/checkins", { params: { limit: 300, ...(date ? { date } : {}) } });
       setRows(res.data);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
     } finally {
       setLoading(false);
     }
-  };
+  }, [date]);
 
   useEffect(() => {
     if (open) load();
-  }, [open]);
+  }, [open, load]);
 
   const undoDelete = async (checkin, session) => {
     try {
@@ -104,20 +105,27 @@ export function ResponsesDialog({ open, onOpenChange, onChanged }) {
             <DialogDescription>
               Edit or delete any check-in submitted by mistake. Removing a response also deletes its logged training session.
             </DialogDescription>
+            {date && (
+              <p className="text-xs font-semibold text-primary" data-testid="responses-date-note">
+                Showing responses for {format(parseISO(date), "EEEE, d MMMM yyyy")}
+              </p>
+            )}
           </DialogHeader>
 
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" onClick={() => setClearOpen(true)} disabled={rows.length === 0}
-              className="gap-1.5 border-rose-500/40 text-rose-500 hover:bg-rose-500/10" data-testid="clear-today-button">
-              <Eraser className="h-4 w-4" /> Clear today's check-ins
-            </Button>
-          </div>
+          {!date && (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={() => setClearOpen(true)} disabled={rows.length === 0}
+                className="gap-1.5 border-rose-500/40 text-rose-500 hover:bg-rose-500/10" data-testid="clear-today-button">
+                <Eraser className="h-4 w-4" /> Clear today's check-ins
+              </Button>
+            </div>
+          )}
 
           <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-border">
             {loading ? (
               <div className="p-8 text-center text-muted-foreground">Loading responses…</div>
             ) : rows.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">No responses yet.</div>
+              <div className="p-8 text-center text-muted-foreground">{date ? "No responses on this day." : "No responses yet."}</div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-muted/80 text-xs uppercase text-muted-foreground backdrop-blur">
