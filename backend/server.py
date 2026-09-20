@@ -11,7 +11,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 import jwt
 import bcrypt
@@ -170,6 +170,7 @@ class CheckInPayload(BaseModel):
     temperature: Optional[str] = ""
     illnessNotes: Optional[str] = ""
     sorenessAreas: List[str] = Field(default_factory=list)
+    sorenessSide: Optional[Literal["", "Right", "Left", "Both"]] = ""
     sorenessSeverity: Optional[int] = 0
     sorenessNotes: Optional[str] = ""
     logSession: bool = False
@@ -218,6 +219,7 @@ async def notify_coach_alert(data: CheckInPayload, high_soreness: bool):
           <tr><td style="padding:6px 0;color:#888;">Temperature</td><td>{data.temperature or '—'}</td></tr>
           <tr><td style="padding:6px 0;color:#888;">Illness notes</td><td>{data.illnessNotes or '—'}</td></tr>
           <tr><td style="padding:6px 0;color:#888;">Soreness areas</td><td>{', '.join(data.sorenessAreas) or '—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#888;">Soreness side</td><td>{data.sorenessSide or '—'}</td></tr>
           <tr><td style="padding:6px 0;color:#888;">Soreness notes</td><td>{data.sorenessNotes or '—'}</td></tr>
         </table>
         <p style="color:#888;font-size:13px;">View the full squad status on your Medical Team Dashboard.</p>
@@ -250,16 +252,16 @@ async def build_workbook_bytes() -> bytes:
     ws2 = wb.create_sheet("Daily Check-Ins")
     daily_headers = ["Timestamp", "Date", "Athlete", "Sleep (1-5)", "Sleep Notes", "Hydration (1-5)",
                      "Motivation (1-5)", "Feeling Ill", "Symptoms", "Illness Severity", "Temperature (C)",
-                     "Illness Notes", "Soreness Areas", "Soreness Severity", "Soreness Notes"]
+                     "Illness Notes", "Soreness Areas", "Soreness Side", "Soreness Severity", "Soreness Notes"]
     ws2.append(daily_headers)
-    dailies = await db.checkins.find({}, {"_id": 0}).sort("timestamp", 1).to_list(10000)
+    dailies = await db.checkins.find({}, {"_id": 0}).sort("timestamp", 1).to_list(None)
     for d in dailies:
         ws2.append([
             d.get("timestamp", ""), d.get("date", ""), d.get("name", ""),
             d.get("sleepQuality", ""), d.get("sleepNotes", ""), d.get("hydration", ""),
             d.get("motivation", ""), "Yes" if d.get("feelingIll") else "No",
             ", ".join(d.get("symptoms", [])), d.get("illnessSeverity", ""), d.get("temperature", ""),
-            d.get("illnessNotes", ""), ", ".join(d.get("sorenessAreas", [])),
+            d.get("illnessNotes", ""), ", ".join(d.get("sorenessAreas", [])), d.get("sorenessSide", ""),
             d.get("sorenessSeverity", ""), d.get("sorenessNotes", ""),
         ])
     style_header(ws2)
@@ -269,7 +271,7 @@ async def build_workbook_bytes() -> bytes:
     rpe_headers = ["Timestamp", "Date", "Athlete", "Session Type", "RPE (1-10)",
                    "Duration (min)", "Notes", "Training Load"]
     ws3.append(rpe_headers)
-    sessions = await db.sessions.find({}, {"_id": 0}).sort("timestamp", 1).to_list(10000)
+    sessions = await db.sessions.find({}, {"_id": 0}).sort("timestamp", 1).to_list(None)
     for s in sessions:
         ws3.append([
             s.get("timestamp", ""), s.get("date", ""), s.get("name", ""), s.get("sessionType", ""),
@@ -297,6 +299,8 @@ async def build_workbook_bytes() -> bytes:
             continue
         ill_text = ("Yes — " + ", ".join(a.get("symptoms", []))) if a.get("feelingIll") else "No"
         soreness_text = ", ".join(a.get("sorenessAreas", [])) if a.get("sorenessAreas") else "None"
+        if a.get("sorenessAreas") and a.get("sorenessSide"):
+            soreness_text += f" ({a['sorenessSide']})"
         ci = a.get("checkedInAt")
         checked_at = datetime.fromisoformat(ci).astimezone(TZ).strftime("%H:%M") if ci else "—"
         ws4.append([a["name"], a["sleep"], a["hydration"], a["motivation"], ill_text, soreness_text, a.get("load") or "—", checked_at])
@@ -378,6 +382,7 @@ async def submit_checkin(data: CheckInPayload):
         "feelingIll": data.feelingIll, "symptoms": data.symptoms,
         "illnessSeverity": data.illnessSeverity, "temperature": data.temperature,
         "illnessNotes": data.illnessNotes, "sorenessAreas": data.sorenessAreas,
+        "sorenessSide": data.sorenessSide or "",
         "sorenessSeverity": data.sorenessSeverity, "sorenessNotes": data.sorenessNotes,
     }
     await db.checkins.insert_one(checkin_doc)
@@ -459,6 +464,7 @@ async def compute_dashboard(day: Optional[str] = None):
                 "feelingIll": s["feelingIll"], "symptoms": s.get("symptoms", []),
                 "illnessSeverity": s.get("illnessSeverity", ""),
                 "sorenessAreas": s.get("sorenessAreas", []),
+                "sorenessSide": s.get("sorenessSide", ""),
                 "sorenessSeverity": s.get("sorenessSeverity", 0),
                 "checkedInAt": s["timestamp"],
             })
