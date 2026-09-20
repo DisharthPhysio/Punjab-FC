@@ -14,7 +14,7 @@ import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const SYMPTOMS = ["Sore throat", "Cough", "Fever", "Runny nose", "Headache", "Fatigue", "Stomach ache", "Body ache"];
+const SYMPTOMS = ["Sore throat", "Cough", "Fever", "Runny nose", "Headache", "Fatigue", "Stomach ache", "Constipation", "Diarrhea", "Body ache"];
 const SORENESS_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Knees", "Ankle / Foot", "Upper Back / Neck"];
 const SESSION_TYPES = ["Field / Pitch", "Gym / Strength", "Conditioning", "Match / Game", "Recovery", "Skills"];
 const HERO = "https://images.unsplash.com/photo-1758922769578-68c5ba000d87?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwxfHxydW5uZXIlMjBhdGhsZXRlJTIwcG9ydHJhaXQlMjBmb2N1cyUyMHRyYWNrfGVufDB8fHx8MTc4OTcwOTA2Mnww&ixlib=rb-4.1.0&q=85";
@@ -113,7 +113,7 @@ export default function CheckIn() {
           </div>
           <h2 className="text-2xl font-bold">Check-in logged, {name.split(" ")[0]}!</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your coach has your numbers for today. Rest up and train smart. 💪
+            Your medical team has your numbers for today. Rest up and train smart. 💪
           </p>
           <Button
             className="mt-6 w-full" data-testid="new-checkin-button"
@@ -135,14 +135,14 @@ export default function CheckIn() {
         <div className="relative mx-auto max-w-xl px-4 pb-6 pt-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-primary">
-              <Activity className="h-6 w-6" />
-              <span className="text-sm font-bold uppercase tracking-widest">Wellness Check-In</span>
+              <Activity className="h-6 w-6 shrink-0" />
+              <span className="text-sm font-bold uppercase leading-tight tracking-widest">Load and Recovery Monitoring</span>
             </div>
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <Link to="/coach" data-testid="coach-login-link">
                 <Button variant="outline" size="sm" className="gap-1.5">
-                  <Lock className="h-3.5 w-3.5" /> Coach
+                  <Lock className="h-3.5 w-3.5" /> Medical Team
                 </Button>
               </Link>
             </div>
@@ -151,7 +151,7 @@ export default function CheckIn() {
             Daily<br /><span className="text-primary">Readiness</span> Report
           </h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Takes under 60 seconds. Honest answers help your coach manage your load and keep you healthy.
+            Takes under 60 seconds. Honest answers help your medical team manage your load and keep you healthy.
           </p>
         </div>
       </div>
@@ -191,7 +191,7 @@ export default function CheckIn() {
         </Section>
 
         {/* Illness */}
-        <Section icon={ShieldAlert} title="Feeling unwell?" subtitle="Flag anything your coach should know">
+        <Section icon={ShieldAlert} title="Feeling unwell?" subtitle="Flag anything your medical team should know">
           <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
             <span className="text-sm font-medium">I'm feeling ill today</span>
             <Switch data-testid="illness-toggle-switch" checked={feelingIll} onCheckedChange={setFeelingIll} />

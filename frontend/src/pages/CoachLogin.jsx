@@ -42,7 +42,7 @@ export default function CoachLogin() {
         <div className="mb-6 grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
           <ShieldCheck className="h-7 w-7" />
         </div>
-        <h1 className="text-3xl font-black uppercase tracking-tight">Coach<br />Command Center</h1>
+        <h1 className="text-3xl font-black uppercase tracking-tight">Medical Team<br />Command Center</h1>
         <p className="mt-2 text-sm text-muted-foreground">Sign in to view your squad's readiness.</p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">

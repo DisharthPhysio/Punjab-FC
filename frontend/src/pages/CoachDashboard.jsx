@@ -1,11 +1,13 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   LogOut, Download, Mail, Users, UserCheck, AlertTriangle, Zap, Plus, Trash2,
   RefreshCw, Search, Activity, Clock, TrendingUp, CalendarDays, ClipboardList,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
+import { format, parseISO, addDays } from "date-fns";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -16,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const CELL_BG = {
   green: "bg-emerald-500/10",
@@ -48,22 +52,60 @@ export default function CoachDashboard() {
   const [dailyEmail, setDailyEmail] = useState({ enabled: false, hour: 20, recipient: "" });
   const [weeklyDigest, setWeeklyDigest] = useState({ enabled: false, hour: 8, recipient: "" });
 
-  const loadData = async () => {
+  // Calendar: "" means today, otherwise a past day as YYYY-MM-DD
+  const [dateStr, setDateStr] = useState("");
+  const [calOpen, setCalOpen] = useState(false);
+  const [dashLoading, setDashLoading] = useState(false);
+  const [checkinDates, setCheckinDates] = useState([]);
+  const reqId = useRef(0);
+
+  const loadCheckinDates = () =>
+    api.get("/checkins/dates")
+      .then((res) => setCheckinDates((res.data.dates || []).map((d) => parseISO(d))))
+      .catch(() => {});
+
+  const loadData = useCallback(async () => {
+    const id = ++reqId.current;
+    setDashLoading(true);
     try {
       const [dash, ros, settings, weekly] = await Promise.all([
-        api.get("/dashboard"), api.get("/roster"),
+        api.get("/dashboard", { params: dateStr ? { date: dateStr } : {} }), api.get("/roster"),
         api.get("/settings/daily-email"), api.get("/settings/weekly-digest"),
       ]);
+      if (id !== reqId.current) return; // a newer request replaced this one
       setData(dash.data);
       setRoster(ros.data);
       setDailyEmail(settings.data);
       setWeeklyDigest(weekly.data);
+      loadCheckinDates();
     } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail));
+      if (id === reqId.current) toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      if (id === reqId.current) setDashLoading(false);
     }
-  };
+  }, [dateStr]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const todayStr = data?.today || data?.date || format(new Date(), "yyyy-MM-dd");
+  const isToday = !dateStr;
+  const selectedDate = parseISO(dateStr || todayStr);
+  const maxDate = parseISO(todayStr);
+  const dateLabel = isToday
+    ? `Today · ${format(selectedDate, "d MMM yyyy")}`
+    : format(selectedDate, "EEE, d MMM yyyy");
+
+  const goToDate = (s) => setDateStr(s === todayStr ? "" : s);
+  const pickDate = (d) => {
+    if (!d) return;
+    goToDate(format(d, "yyyy-MM-dd"));
+    setCalOpen(false);
+  };
+  const shiftDay = (n) => {
+    const next = format(addDays(parseISO(dateStr || todayStr), n), "yyyy-MM-dd");
+    if (next > todayStr) return;
+    goToDate(next);
+  };
 
   const doLogout = () => { logout(); navigate("/coach"); };
 
@@ -150,7 +192,7 @@ export default function CoachDashboard() {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.download = `Wellness Report - ${data?.date || "today"}.xlsx`;
+      link.download = `Load and Recovery Monitoring Report - ${data?.today || data?.date || "today"}.xlsx`;
       link.click();
       window.URL.revokeObjectURL(url);
       toast.success("Excel report downloaded");
@@ -201,8 +243,49 @@ export default function CoachDashboard() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black uppercase tracking-tight sm:text-4xl">Today's Squad Status</h1>
-            <p className="text-sm text-muted-foreground">{data?.date}</p>
+            <h1 className="text-3xl font-black uppercase tracking-tight sm:text-4xl">{isToday ? "Today's Squad Status" : "Squad Status"}</h1>
+            <p className="text-sm text-muted-foreground">
+              {data?.date}{!isToday && <span> · viewing a previous day</span>}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="date-navigator">
+              <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => shiftDay(-1)}
+                aria-label="Previous day" data-testid="date-prev-button">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Popover open={calOpen} onOpenChange={setCalOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-1.5" data-testid="date-picker-button">
+                    <CalendarDays className="h-4 w-4" /> {dateLabel}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-0" data-testid="calendar-popover">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    defaultMonth={selectedDate}
+                    onSelect={pickDate}
+                    disabled={{ after: maxDate }}
+                    modifiers={{ hasData: checkinDates }}
+                    modifiersClassNames={{
+                      hasData: "relative after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary aria-selected:after:bg-primary-foreground",
+                    }}
+                    initialFocus
+                  />
+                  <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                    Dots mark days that have responses.
+                  </p>
+                </PopoverContent>
+              </Popover>
+              <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => shiftDay(1)} disabled={isToday}
+                aria-label="Next day" data-testid="date-next-button">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              {!isToday && (
+                <Button variant="ghost" size="sm" className="h-9" onClick={() => setDateStr("")} data-testid="date-today-button">
+                  Back to today
+                </Button>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={loadData} className="gap-1.5" data-testid="refresh-button">
@@ -249,7 +332,7 @@ export default function CoachDashboard() {
         </div>
 
         {/* Squad table */}
-        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+        <div className={`overflow-x-auto rounded-2xl border border-border bg-card transition-opacity ${dashLoading ? "opacity-60" : ""}`}>
           <table className="w-full min-w-[820px] text-sm" data-testid="squad-status-table">
             <thead>
               <tr className="border-b border-border bg-secondary/50 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -402,6 +485,7 @@ export default function CoachDashboard() {
         onOpenChange={(o) => !o && setTrendsFor(null)}
       />
       <ResponsesDialog
+        date={dateStr}
         open={responsesOpen}
         onOpenChange={setResponsesOpen}
         onChanged={loadData}
