@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   LogOut, Download, Mail, Users, UserCheck, AlertTriangle, Zap, Plus, Trash2,
   RefreshCw, Search, Activity, Clock, TrendingUp, CalendarDays, ClipboardList,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, MessageCircle, Phone,
 } from "lucide-react";
 import { format, parseISO, addDays } from "date-fns";
 import api, { formatApiError } from "@/lib/api";
@@ -13,6 +13,9 @@ import { useAuth } from "@/context/AuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AthleteTrendsDialog } from "@/components/AthleteTrendsDialog";
 import { ResponsesDialog } from "@/components/ResponsesDialog";
+import { RemindersDialog } from "@/components/RemindersDialog";
+import { PhoneNumbersDialog } from "@/components/PhoneNumbersDialog";
+import { reminderMessage, whatsappLink, loadReminded, saveReminded } from "@/lib/whatsapp";
 import { TrafficLightBadge, goodScaleStatus, loadStatus, sorenessStatus } from "@/components/TrafficLightBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +61,11 @@ export default function CoachDashboard() {
   const [dashLoading, setDashLoading] = useState(false);
   const [checkinDates, setCheckinDates] = useState([]);
   const reqId = useRef(0);
+
+  // WhatsApp reminders (one tap per player; the Medical Team presses Send in WhatsApp)
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const [phonesOpen, setPhonesOpen] = useState(false);
+  const [reminded, setReminded] = useState([]);
 
   const loadCheckinDates = () =>
     api.get("/checkins/dates")
@@ -105,6 +113,18 @@ export default function CoachDashboard() {
     const next = format(addDays(parseISO(dateStr || todayStr), n), "yyyy-MM-dd");
     if (next > todayStr) return;
     goToDate(next);
+  };
+
+  // Reminders only make sense for today. "Reminded" ticks are remembered in this browser for the day.
+  const pendingList = (data?.athletes || []).filter((a) => !a.checkedIn);
+  const siteLink = window.location.origin;
+  useEffect(() => {
+    if (data?.today) setReminded(loadReminded(data.today));
+  }, [data?.today]);
+  const markReminded = (id) => {
+    const next = reminded.includes(id) ? reminded : [...reminded, id];
+    setReminded(next);
+    saveReminded(todayStr, next);
   };
 
   const doLogout = () => { logout(); navigate("/coach"); };
@@ -294,6 +314,11 @@ export default function CoachDashboard() {
             <Button variant="outline" size="sm" onClick={() => setResponsesOpen(true)} className="gap-1.5" data-testid="manage-responses-button">
               <ClipboardList className="h-4 w-4" /> Responses
             </Button>
+            {isToday && (
+              <Button variant="outline" size="sm" onClick={() => setRemindersOpen(true)} className="gap-1.5" data-testid="remind-pending-button">
+                <MessageCircle className="h-4 w-4" /> Remind{pendingList.length ? ` (${pendingList.length})` : ""}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={exportExcel} disabled={busy} className="gap-1.5" data-testid="export-excel-button">
               <Download className="h-4 w-4" /> Export Excel
             </Button>
@@ -356,7 +381,25 @@ export default function CoachDashboard() {
                       <button onClick={() => setTrendsFor(a.name)} className="font-semibold hover:text-primary" data-testid={`athlete-name-${a.name}`}>{a.name}</button>
                     </td>
                       <td colSpan={5} className="px-4 py-3 text-center text-muted-foreground">
-                        <TrafficLightBadge status="grey" label="Not checked in" />
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <TrafficLightBadge status="grey" label="Not checked in" />
+                          {isToday && (a.phone ? (
+                            <Button asChild size="sm" variant={reminded.includes(a.id) ? "outline" : "default"} className="h-7 gap-1 px-2 text-xs">
+                              <a
+                                href={whatsappLink(a.phone, reminderMessage(a.name, siteLink))}
+                                target="_blank" rel="noopener noreferrer"
+                                onClick={() => markReminded(a.id)}
+                                data-testid={`remind-athlete-${a.id}`}
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" /> {reminded.includes(a.id) ? "Reminded ✓" : "Remind"}
+                              </a>
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => setPhonesOpen(true)} data-testid={`add-phone-${a.id}`}>
+                              <Phone className="h-3.5 w-3.5" /> Add number
+                            </Button>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-center font-mono font-bold text-muted-foreground">{a.load ?? dash}</td>
                       <td className="px-4 py-3 text-center">
@@ -451,8 +494,15 @@ export default function CoachDashboard() {
 
         {/* Roster management */}
         <div className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-lg font-bold">Roster Management</h3>
-          <p className="text-xs text-muted-foreground">Add or remove athletes from your squad.</p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-bold">Roster Management</h3>
+              <p className="text-xs text-muted-foreground">Add or remove athletes from your squad.</p>
+            </div>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPhonesOpen(true)} data-testid="phone-numbers-button">
+              <Phone className="h-4 w-4" /> Phone numbers
+            </Button>
+          </div>
           <div className="mt-4 flex gap-2">
             <Input
               data-testid="add-athlete-input" value={newAthlete} onChange={(e) => setNewAthlete(e.target.value)}
@@ -484,6 +534,16 @@ export default function CoachDashboard() {
         open={!!trendsFor}
         onOpenChange={(o) => !o && setTrendsFor(null)}
       />
+      <RemindersDialog
+        open={remindersOpen}
+        onOpenChange={setRemindersOpen}
+        pending={pendingList}
+        reminded={reminded}
+        onReminded={markReminded}
+        onAddNumbers={() => { setRemindersOpen(false); setPhonesOpen(true); }}
+      />
+      <PhoneNumbersDialog open={phonesOpen} onOpenChange={setPhonesOpen} onChanged={loadData} />
+
       <ResponsesDialog
         date={dateStr}
         open={responsesOpen}
