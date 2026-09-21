@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+import re
 import uuid
 import logging
 import asyncio
@@ -35,6 +36,8 @@ if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET must be set to a long random string")
 JWT_ALGORITHM = "HS256"
 COACH_EMAIL = os.environ.get('COACH_EMAIL', '')
+# Country code assumed for phone numbers typed as 10 digits (WhatsApp reminders). India = 91.
+DEFAULT_COUNTRY_CODE = os.environ.get('DEFAULT_COUNTRY_CODE', '91').strip().lstrip('+') or '91'
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
 TZ = ZoneInfo(os.environ.get('TIMEZONE', 'UTC'))
@@ -72,6 +75,40 @@ def parse_day(date_str: Optional[str]) -> Optional[str]:
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date. Use YYYY-MM-DD.")
     return date_str
+
+
+def normalize_phone(raw: Optional[str]) -> str:
+    """Turn a typed phone number into digits-only international format (what WhatsApp links need).
+    '' means 'no number'. Raises ValueError with a readable message when it cannot be a valid number."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    had_plus = s.startswith("+")
+    digits = re.sub(r"\D", "", s)
+    if not had_plus:
+        if digits.startswith("00"):
+            digits = digits[2:]                                   # 0091 98765... -> 91 98765...
+        elif digits.startswith("0") and len(digits) == 11:
+            digits = DEFAULT_COUNTRY_CODE + digits[1:]            # 098765 43210 -> 91 98765 43210
+        elif len(digits) == 10:
+            digits = DEFAULT_COUNTRY_CODE + digits                # 98765 43210 -> 91 98765 43210
+    if digits.startswith("0") or not (8 <= len(digits) <= 15):
+        raise ValueError(f"'{s}' is not a valid phone number. Include the country code, e.g. +91 98765 43210.")
+    return digits
+
+
+def norm_name(name: str) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
+_IMPORT_DELIM = re.compile(r"^\s*(.+?)\s*[,;\t:|\-\u2013\u2014]+\s*(\+?\d[\d\s().\-]{6,})\s*$")
+_IMPORT_SPACE = re.compile(r"^\s*(.+?)\s+(\+?\d[\d\s().\-]{6,})\s*$")
+
+
+def parse_import_line(line: str):
+    """'Name, 98765 43210' / 'Name - +91 98765 43210' / 'Name<TAB>9876543210' -> (name, number) or None."""
+    m = _IMPORT_DELIM.match(line) or _IMPORT_SPACE.match(line)
+    return (m.group(1).strip(), m.group(2).strip()) if m else None
 
 
 FILLS = {
@@ -152,6 +189,14 @@ async def get_current_user(request: Request) -> dict:
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class PhonePayload(BaseModel):
+    phone: str = ""
+
+
+class PhoneImportPayload(BaseModel):
+    text: str = ""
 
 
 class AthleteCreate(BaseModel):
@@ -367,7 +412,68 @@ async def remove_athlete(athlete_id: str, user: dict = Depends(get_current_user)
     res = await db.roster.delete_one({"id": athlete_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Athlete not found")
+    await db.athlete_contacts.delete_one({"athlete_id": athlete_id})
     return {"status": "ok"}
+
+
+# ---------- Phone numbers (Medical Team only - kept in their own collection, never in the public roster) ----------
+async def contact_map():
+    docs = await db.athlete_contacts.find({}, {"_id": 0}).to_list(5000)
+    return {d["athlete_id"]: d.get("phone", "") for d in docs}
+
+
+@api_router.get("/roster/contacts")
+async def roster_contacts(user: dict = Depends(get_current_user)):
+    roster = await db.roster.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(1000)
+    contacts = await contact_map()
+    return [{"id": a["id"], "name": a["name"], "phone": contacts.get(a["id"], "")} for a in roster]
+
+
+@api_router.put("/roster/{athlete_id}/phone")
+async def set_athlete_phone(athlete_id: str, payload: PhonePayload, user: dict = Depends(get_current_user)):
+    athlete = await db.roster.find_one({"id": athlete_id}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    try:
+        phone = normalize_phone(payload.phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if phone:
+        await db.athlete_contacts.update_one(
+            {"athlete_id": athlete_id}, {"$set": {"phone": phone, "updated_at": now_utc().isoformat()}}, upsert=True)
+    else:
+        await db.athlete_contacts.delete_one({"athlete_id": athlete_id})
+    return {"id": athlete_id, "name": athlete["name"], "phone": phone}
+
+
+@api_router.post("/roster/phones/import")
+async def import_phones(payload: PhoneImportPayload, user: dict = Depends(get_current_user)):
+    """Paste lines like 'Name, number'. Matches names to the roster (ignoring case) and saves valid numbers."""
+    roster = await db.roster.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    by_name = {norm_name(a["name"]): a for a in roster}
+    updated, unmatched, invalid = [], [], []
+    for raw in payload.text.splitlines()[:500]:
+        line = raw.strip()
+        if not line:
+            continue
+        parsed = parse_import_line(line)
+        if not parsed:
+            invalid.append({"line": line, "reason": "Use the format: Name, number"})
+            continue
+        name, number = parsed
+        athlete = by_name.get(norm_name(name))
+        if not athlete:
+            unmatched.append(line)
+            continue
+        try:
+            phone = normalize_phone(number)
+        except ValueError as e:
+            invalid.append({"line": line, "reason": str(e)})
+            continue
+        await db.athlete_contacts.update_one(
+            {"athlete_id": athlete["id"]}, {"$set": {"phone": phone, "updated_at": now_utc().isoformat()}}, upsert=True)
+        updated.append({"id": athlete["id"], "name": athlete["name"], "phone": phone})
+    return {"updated": updated, "unmatched": unmatched, "invalid": invalid}
 
 
 # ---------- Check-In Route ----------
@@ -492,7 +598,11 @@ async def compute_dashboard(day: Optional[str] = None):
 
 @api_router.get("/dashboard")
 async def dashboard(date: Optional[str] = None, user: dict = Depends(get_current_user)):
-    return await compute_dashboard(parse_day(date))
+    data = await compute_dashboard(parse_day(date))
+    contacts = await contact_map()
+    for a in data["athletes"]:
+        a["phone"] = contacts.get(a["id"], "")
+    return data
 
 
 @api_router.get("/trends")
@@ -848,6 +958,7 @@ async def startup():
         raise RuntimeError("ADMIN_EMAIL and ADMIN_PASSWORD must be set (refusing to start with a blank coach login)")
     await db.users.create_index("email", unique=True)
     await db.roster.create_index("name", unique=True)
+    await db.athlete_contacts.create_index("athlete_id", unique=True)
     # seed coach
     admin_email = os.environ.get('ADMIN_EMAIL', '').strip().lower()
     admin_password = os.environ.get('ADMIN_PASSWORD', '')
