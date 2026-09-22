@@ -7,6 +7,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os
 import io
 import re
+import statistics
 import uuid
 import logging
 import asyncio
@@ -330,14 +331,15 @@ async def build_workbook_bytes() -> bytes:
     ws4.append([f"Today's Squad Status — {dash['date']}"])
     ws4["A1"].font = Font(bold=True, size=14)
     ws4.append([])
-    dash_headers = ["Athlete", "Sleep", "Hydration", "Motivation", "Illness", "Soreness", "Session Load", "Checked In At"]
+    dash_headers = ["Athlete", "Sleep", "Hydration", "Motivation", "Illness", "Soreness", "Session Load", "Checked In At", "7-Day Load", "Monotony", "Strain"]
     ws4.append(dash_headers)
     for cell in ws4[3]:
         cell.fill = header_fill
         cell.font = header_font
     for a in dash["athletes"]:
         if not a["checkedIn"]:
-            ws4.append([a["name"], "—", "—", "—", "Not checked in", "—", a.get("load") or "—", "—"])
+            ws4.append([a["name"], "—", "—", "—", "Not checked in", "—", a.get("load") or "—", "—",
+                        a.get("weekLoad", 0), a.get("monotony") if a.get("monotony") is not None else "—", a.get("strain") if a.get("strain") is not None else "—"])
             r = ws4.max_row
             for c in range(2, 9):
                 ws4.cell(row=r, column=c).fill = FILLS["grey"]
@@ -348,7 +350,8 @@ async def build_workbook_bytes() -> bytes:
             soreness_text += f" ({a['sorenessSide']})"
         ci = a.get("checkedInAt")
         checked_at = datetime.fromisoformat(ci).astimezone(TZ).strftime("%H:%M") if ci else "—"
-        ws4.append([a["name"], a["sleep"], a["hydration"], a["motivation"], ill_text, soreness_text, a.get("load") or "—", checked_at])
+        ws4.append([a["name"], a["sleep"], a["hydration"], a["motivation"], ill_text, soreness_text, a.get("load") or "—", checked_at,
+                    a.get("weekLoad", 0), a.get("monotony") if a.get("monotony") is not None else "—", a.get("strain") if a.get("strain") is not None else "—"])
         r = ws4.max_row
         ws4.cell(row=r, column=2).fill = FILLS[good_scale_status(a["sleep"])]
         ws4.cell(row=r, column=3).fill = FILLS[good_scale_status(a["hydration"])]
@@ -356,6 +359,10 @@ async def build_workbook_bytes() -> bytes:
         ws4.cell(row=r, column=5).fill = FILLS["red" if a.get("feelingIll") else "green"]
         ws4.cell(row=r, column=6).fill = FILLS[soreness_status(a.get("sorenessAreas"), a.get("sorenessSeverity"))]
         ws4.cell(row=r, column=7).fill = FILLS[load_status(a.get("load"))]
+    for r in range(4, ws4.max_row + 1):
+        risk = next((x.get("monotonyRisk") for x in dash["athletes"] if x["name"] == ws4.cell(row=r, column=1).value), None)
+        if risk:
+            ws4.cell(row=r, column=10).fill = FILLS[risk]
     ws4.column_dimensions["A"].width = 18
     ws4.column_dimensions["E"].width = 22
     ws4.column_dimensions["F"].width = 24
@@ -545,6 +552,63 @@ async def compute_acwr_map(ref_day: Optional[str] = None):
     return result
 
 
+# Foster (1998) weekly metrics. The bands are rule-of-thumb markers for a conversation, not a diagnosis:
+# monotony >= 2.0 is the value most often quoted as "high"; 1.5-2.0 is shown as "watch".
+MONOTONY_WATCH = 1.5
+MONOTONY_HIGH = 2.0
+
+
+def week_stats(daily_loads):
+    """Weekly metrics from 7 daily load totals (0 = no session that day), oldest -> newest.
+    monotony = mean daily load / standard deviation of the daily loads (sample SD, n-1)
+    strain   = weekly load x monotony
+    monotony/strain are None when the week has no load, or every day is identical (SD = 0 -> undefined)."""
+    total = sum(daily_loads)
+    out = {"load": total, "daysLogged": sum(1 for x in daily_loads if x > 0),
+           "monotony": None, "strain": None, "monotonyRisk": None}
+    if total <= 0 or len(daily_loads) < 2:
+        return out
+    sd = statistics.stdev(daily_loads)
+    if sd == 0:
+        return out
+    mono_raw = (total / len(daily_loads)) / sd
+    mono = round(mono_raw, 2)      # classify on the number people SEE, so 2.00 on screen is never shown as "watch"
+    out["monotony"] = mono
+    out["strain"] = int(round(total * mono_raw))
+    out["monotonyRisk"] = "red" if mono >= MONOTONY_HIGH else ("amber" if mono >= MONOTONY_WATCH else "green")
+    return out
+
+
+def daily_load_series(sessions, end_day, n_days):
+    """{athlete name: [total load per day for the n_days ending at end_day, oldest first]}"""
+    index = {(end_day - timedelta(days=i)).strftime('%Y-%m-%d'): n_days - 1 - i for i in range(n_days)}
+    out = {}
+    for s in sessions:
+        pos = index.get(s.get("date"))
+        if pos is None:
+            continue
+        out.setdefault(s["name"], [0] * n_days)[pos] += int(s.get("load", 0))
+    return out
+
+
+def change_pct(current, previous):
+    return int(round((current - previous) / previous * 100)) if previous and previous > 0 else None
+
+
+async def compute_weekly_metrics(ref_day: Optional[str] = None):
+    """Last-7-days metrics per athlete as of ref_day (default today), plus change vs the 7 days before."""
+    end_day = datetime.strptime(ref_day, '%Y-%m-%d').date() if ref_day else datetime.now(TZ).date()
+    start = (end_day - timedelta(days=13)).strftime('%Y-%m-%d')
+    sessions = await db.sessions.find({"date": {"$gte": start, "$lte": end_day.strftime('%Y-%m-%d')}}, {"_id": 0}).to_list(None)
+    result = {}
+    for name, loads in daily_load_series(sessions, end_day, 14).items():
+        st = week_stats(loads[7:])
+        st["prevLoad"] = sum(loads[:7])
+        st["changePct"] = change_pct(st["load"], st["prevLoad"])
+        result[name] = st
+    return result
+
+
 async def compute_dashboard(day: Optional[str] = None):
     d = day or today_str()
     roster = await db.roster.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
@@ -585,6 +649,15 @@ async def compute_dashboard(day: Optional[str] = None):
         m = acwr_map.get(a["name"], {"acwr": None, "risk": None})
         a["acwr"] = m["acwr"]
         a["acwrRisk"] = m["risk"]
+    weekly = await compute_weekly_metrics(d)
+    for a in athletes:
+        w = weekly.get(a["name"])
+        a["weekLoad"] = w["load"] if w else 0
+        a["weekChangePct"] = w["changePct"] if w else None
+        a["monotony"] = w["monotony"] if w else None
+        a["strain"] = w["strain"] if w else None
+        a["monotonyRisk"] = w["monotonyRisk"] if w else None
+        a["weekDaysLogged"] = w["daysLogged"] if w else 0
     load_spikes = sum(1 for a in athletes if a.get("acwrRisk") == "red")
 
     return {
@@ -606,28 +679,97 @@ async def dashboard(date: Optional[str] = None, user: dict = Depends(get_current
 
 
 @api_router.get("/trends")
-async def trends(name: str, user: dict = Depends(get_current_user)):
-    today = datetime.now(TZ).date()
-    date_strs = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6, -1, -1)]
-    checkins = await db.checkins.find({"name": name, "date": {"$in": date_strs}}, {"_id": 0}).sort("timestamp", 1).to_list(10000)
+async def trends(name: str, days: int = 7, end: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Per-athlete history for the last `days` days (7-90) ending on `end` (default today):
+    daily load / readiness / soreness / illness, plus weekly load, monotony, strain and change vs the previous week."""
+    days = max(7, min(int(days), 90))
+    end_str = parse_day(end)
+    end_day = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else datetime.now(TZ).date()
+    span = days + 7   # one extra week so the oldest week can show its change vs the week before it
+    date_strs = [(end_day - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(span - 1, -1, -1)]
+    window = {"$gte": date_strs[0], "$lte": date_strs[-1]}
+    checkins = await db.checkins.find({"name": name, "date": window}, {"_id": 0}).sort("timestamp", 1).to_list(None)
     latest = {}
     for c in checkins:
         latest[c["date"]] = c
-    sessions = await db.sessions.find({"name": name, "date": {"$in": date_strs}}, {"_id": 0}).to_list(10000)
+    sessions = await db.sessions.find({"name": name, "date": window}, {"_id": 0}).to_list(None)
     load_by = {}
-    for s in sessions:
-        load_by[s["date"]] = load_by.get(s["date"], 0) + int(s.get("load", 0))
-    days = []
+    for s_ in sessions:
+        load_by[s_["date"]] = load_by.get(s_["date"], 0) + int(s_.get("load", 0))
+    all_days = []
     for ds in date_strs:
         c = latest.get(ds)
-        days.append({
+        sev = (c.get("sorenessSeverity") or 0) if c else 0
+        areas = (c.get("sorenessAreas") or []) if c else []
+        all_days.append({
             "date": ds,
             "load": load_by.get(ds, 0),
             "sleep": c["sleepQuality"] if c else None,
             "hydration": c["hydration"] if c else None,
             "motivation": c["motivation"] if c else None,
+            "soreness": sev if areas else None,
+            "sorenessAreas": areas,
+            "sorenessSide": (c.get("sorenessSide") or "") if c else "",
+            "ill": bool(c and c.get("feelingIll")),
+            "symptoms": (c.get("symptoms") or []) if c else [],
+            "illnessSeverity": (c.get("illnessSeverity") or "") if c else "",
         })
-    return {"name": name, "days": days}
+    loads = [d["load"] for d in all_days]
+    weeks = []
+    for j in range(days // 7 - 1, -1, -1):     # oldest week first
+        cur = loads[span - 7 * (j + 1): span - 7 * j]
+        prev = loads[span - 7 * (j + 2): span - 7 * (j + 1)]
+        st = week_stats(cur)
+        st["weekStart"] = all_days[span - 7 * (j + 1)]["date"]
+        st["weekEnd"] = all_days[span - 7 * j - 1]["date"]
+        st["prevLoad"] = sum(prev)
+        st["changePct"] = change_pct(st["load"], st["prevLoad"])
+        weeks.append(st)
+    return {"name": name, "range": days, "end": date_strs[-1], "days": all_days[-days:], "weeks": weeks}
+
+
+HEATMAP_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Gluteus", "Groin", "Upper Back / Neck"]
+
+
+@api_router.get("/heatmap")
+async def heatmap(date: Optional[str] = None, days: int = 1, user: dict = Depends(get_current_user)):
+    """Team soreness map: how many athletes reported each body area over the last `days` days (1-30) ending on `date`.
+    Uses each athlete's latest check-in per day; per athlete and area the highest severity in the window counts."""
+    days = max(1, min(int(days), 30))
+    end_str = parse_day(date) or today_str()
+    end_day = datetime.strptime(end_str, '%Y-%m-%d').date()
+    start_str = (end_day - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+    rows = await db.checkins.find({"date": {"$gte": start_str, "$lte": end_str}}, {"_id": 0}).sort("timestamp", 1).to_list(None)
+    latest = {}
+    for r in rows:
+        latest[(r["name"], r["date"])] = r          # last check-in of the day wins
+    best = {}
+    for (name, day_), r in sorted(latest.items(), key=lambda kv: kv[0][1]):   # oldest day first, so ties go to the newer day
+        sev = int(r.get("sorenessSeverity") or 0)
+        for area in (r.get("sorenessAreas") or []):
+            cur = best.get((name, area))
+            if cur is None or sev >= cur["severity"]:
+                best[(name, area)] = {"severity": sev, "side": r.get("sorenessSide") or ""}
+    areas = {a: {"area": a, "athletes": 0, "avgSeverity": 0, "maxSeverity": 0, "right": 0, "left": 0, "both": 0,
+                 "unspecified": 0, "names": []} for a in HEATMAP_AREAS}
+    sums = {}
+    for (name, area), e in best.items():
+        a = areas.setdefault(area, {"area": area, "athletes": 0, "avgSeverity": 0, "maxSeverity": 0, "right": 0,
+                                    "left": 0, "both": 0, "unspecified": 0, "names": []})
+        a["athletes"] += 1
+        sums[area] = sums.get(area, 0) + e["severity"]
+        a["maxSeverity"] = max(a["maxSeverity"], e["severity"])
+        a[{"Right": "right", "Left": "left", "Both": "both"}.get(e["side"], "unspecified")] += 1
+        a["names"].append({"name": name, "severity": e["severity"], "side": e["side"]})
+    for area, a in areas.items():
+        if a["athletes"]:
+            a["avgSeverity"] = round(sums[area] / a["athletes"], 1)
+        a["names"].sort(key=lambda n: (-n["severity"], n["name"]))
+    ordered = sorted(areas.values(), key=lambda a: (-a["athletes"], -a["maxSeverity"], a["area"]))
+    return {"start": start_str, "end": end_str, "days": days,
+            "athletesChecked": len({n for (n, _d) in latest}),
+            "athletesWithSoreness": len({n for (n, _a) in best}),
+            "areas": ordered}
 
 
 @api_router.get("/checkins/dates")
