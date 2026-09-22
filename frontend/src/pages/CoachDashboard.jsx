@@ -15,6 +15,7 @@ import { AthleteTrendsDialog } from "@/components/AthleteTrendsDialog";
 import { ResponsesDialog } from "@/components/ResponsesDialog";
 import { RemindersDialog } from "@/components/RemindersDialog";
 import { PhoneNumbersDialog } from "@/components/PhoneNumbersDialog";
+import { TeamPainMap } from "@/components/TeamPainMap";
 import { reminderMessage, whatsappLink, loadReminded, saveReminded } from "@/lib/whatsapp";
 import { TrafficLightBadge, goodScaleStatus, loadStatus, sorenessStatus } from "@/components/TrafficLightBadge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ export default function CoachDashboard() {
   const [remindersOpen, setRemindersOpen] = useState(false);
   const [phonesOpen, setPhonesOpen] = useState(false);
   const [reminded, setReminded] = useState([]);
+  const [mapTick, setMapTick] = useState(0); // bumped to make the Team Pain Map reload
 
   const loadCheckinDates = () =>
     api.get("/checkins/dates")
@@ -121,6 +123,28 @@ export default function CoachDashboard() {
   useEffect(() => {
     if (data?.today) setReminded(loadReminded(data.today));
   }, [data?.today]);
+  const refreshAll = () => { loadData(); setMapTick((t) => t + 1); };
+
+  // 7-day load (+ change vs the week before), Foster monotony and strain, as of the selected day
+  const weekCells = (a) => (
+    <>
+      <td className="px-4 py-3 text-center font-mono font-bold" data-testid={`week-load-${a.id}`}>
+        {a.weekLoad ? a.weekLoad : <span className="font-normal text-muted-foreground">{dash}</span>}
+        {a.weekLoad && a.weekChangePct !== null && a.weekChangePct !== undefined ? (
+          <span className="ml-1 text-[10px] font-normal text-muted-foreground" data-testid={`week-change-${a.id}`}>
+            {a.weekChangePct > 0 ? "▲" : a.weekChangePct < 0 ? "▼" : ""}{Math.abs(a.weekChangePct)}%
+          </span>
+        ) : null}
+      </td>
+      <td className="px-4 py-3 text-center">
+        {a.monotonyRisk
+          ? <TrafficLightBadge status={a.monotonyRisk} label={a.monotony} testId={`monotony-badge-${a.id}`} />
+          : <span className="text-muted-foreground">{dash}</span>}
+      </td>
+      <td className="px-4 py-3 text-center font-mono text-muted-foreground" data-testid={`strain-${a.id}`}>{a.strain ?? dash}</td>
+    </>
+  );
+
   const markReminded = (id) => {
     const next = reminded.includes(id) ? reminded : [...reminded, id];
     setReminded(next);
@@ -308,7 +332,7 @@ export default function CoachDashboard() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={loadData} className="gap-1.5" data-testid="refresh-button">
+            <Button variant="outline" size="sm" onClick={refreshAll} className="gap-1.5" data-testid="refresh-button">
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={() => setResponsesOpen(true)} className="gap-1.5" data-testid="manage-responses-button">
@@ -358,7 +382,7 @@ export default function CoachDashboard() {
 
         {/* Squad table */}
         <div className={`overflow-x-auto rounded-2xl border border-border bg-card transition-opacity ${dashLoading ? "opacity-60" : ""}`}>
-          <table className="w-full min-w-[820px] text-sm" data-testid="squad-status-table">
+          <table className="w-full min-w-[1060px] text-sm" data-testid="squad-status-table">
             <thead>
               <tr className="border-b border-border bg-secondary/50 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">
                 <th className="sticky left-0 bg-secondary/50 px-4 py-3">Athlete</th>
@@ -369,6 +393,9 @@ export default function CoachDashboard() {
                 <th className="px-4 py-3">Soreness</th>
                 <th className="px-4 py-3 text-center">Load</th>
                 <th className="px-4 py-3 text-center">ACWR</th>
+                <th className="px-4 py-3 text-center" title="Training load of the last 7 days (RPE x minutes), with the change vs the 7 days before">7-Day Load</th>
+                <th className="px-4 py-3 text-center" title="Average daily load / its day-to-day variation over 7 days. 2.0 or more = high, 1.5-2.0 = watch">Monotony</th>
+                <th className="px-4 py-3 text-center" title="7-day load x monotony">Strain</th>
                 <th className="px-4 py-3 text-center">Time</th>
               </tr>
             </thead>
@@ -405,6 +432,7 @@ export default function CoachDashboard() {
                       <td className="px-4 py-3 text-center">
                         {a.acwrRisk ? <TrafficLightBadge status={a.acwrRisk} label={a.acwr} testId={`acwr-badge-${a.id}`} /> : <span className="text-muted-foreground">{dash}</span>}
                       </td>
+                      {weekCells(a)}
                       <td className="px-4 py-3 text-center text-muted-foreground">{dash}</td>
                     </tr>
                   );
@@ -441,6 +469,7 @@ export default function CoachDashboard() {
                     <td className="px-4 py-3 text-center">
                       {a.acwrRisk ? <TrafficLightBadge status={a.acwrRisk} label={a.acwr} testId={`acwr-badge-${a.id}`} /> : <span className="text-muted-foreground">{dash}</span>}
                     </td>
+                    {weekCells(a)}
                     <td className="px-4 py-3 text-center font-mono text-xs text-muted-foreground">{time}</td>
                   </motion.tr>
                 );
@@ -450,7 +479,14 @@ export default function CoachDashboard() {
               )}
             </tbody>
           </table>
+          <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground" data-testid="weekly-metrics-legend">
+            7-Day Load, Monotony and Strain cover the 7 days up to the selected date (days without a session count as 0).
+            Monotony = average daily load ÷ its day-to-day variation: 2.0 or more is high, 1.5–2.0 is worth watching.
+            Strain = 7-day load × monotony. These are rule-of-thumb markers, not a diagnosis.
+          </p>
         </div>
+
+        <TeamPainMap date={dateStr} isToday={isToday} refreshKey={mapTick} />
 
         {/* Automated emails */}
         <div className="grid gap-4 lg:grid-cols-2">
@@ -531,6 +567,7 @@ export default function CoachDashboard() {
 
       <AthleteTrendsDialog
         name={trendsFor}
+        endDate={dateStr}
         open={!!trendsFor}
         onOpenChange={(o) => !o && setTrendsFor(null)}
       />
