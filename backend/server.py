@@ -227,19 +227,24 @@ class CheckInPayload(BaseModel):
 
 
 # ---------- Email ----------
-def _send_email_sync(subject: str, html: str, attachments=None):
-    if not resend.api_key or not COACH_EMAIL:
+def _send_email_sync(subject: str, html: str, attachments=None, to=None):
+    recipients = to if to else ([COACH_EMAIL] if COACH_EMAIL else [])
+    if not resend.api_key or not recipients:
         logger.warning("Resend not configured; skipping email.")
         return None
-    params = {"from": SENDER_EMAIL, "to": [COACH_EMAIL], "subject": subject, "html": html}
+    params = {"from": SENDER_EMAIL, "to": recipients, "subject": subject, "html": html}
     if attachments:
         params["attachments"] = attachments
     return resend.Emails.send(params)
 
 
-async def send_email(subject: str, html: str, attachments=None):
+async def send_email(subject: str, html: str, attachments=None, to=None):
+    """to: optional list of recipient addresses. Defaults to COACH_EMAIL (legacy behavior).
+    NOTE: Resend's default sandbox sender (onboarding@resend.dev) can usually only deliver
+    to the Resend account's own verified address. To actually reach athlete/team emails,
+    verify a custom sending domain in Resend and set SENDER_EMAIL to an address on it."""
     try:
-        return await asyncio.to_thread(_send_email_sync, subject, html, attachments)
+        return await asyncio.to_thread(_send_email_sync, subject, html, attachments, to)
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
         return None
@@ -1082,7 +1087,14 @@ async def scheduled_weekly_digest():
         logger.info("Sent scheduled weekly digest.")
 
 
+import platform_routes
+platform_routes.init(
+    db=db, send_email=send_email, hash_password=hash_password, verify_password=verify_password,
+    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM, now_utc=now_utc, today_str=today_str,
+)
+
 app.include_router(api_router)
+app.include_router(platform_routes.platform_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1101,6 +1113,7 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.roster.create_index("name", unique=True)
     await db.athlete_contacts.create_index("athlete_id", unique=True)
+    await platform_routes.ensure_indexes()
     # seed coach
     admin_email = os.environ.get('ADMIN_EMAIL', '').strip().lower()
     admin_password = os.environ.get('ADMIN_PASSWORD', '')
