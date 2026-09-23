@@ -36,7 +36,7 @@ export default function PlayerDetail() {
   return (
     <AuthShell icon={User} title={player.name} subtitle={player.contact || undefined} backTo="/team/home" maxWidth="max-w-xl">
       <div className="space-y-6">
-        {!player.claimed_by_athlete_id ? (
+        {!player.claimed_at ? (
           <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             {player.name} hasn't joined with the team's athlete code yet — no data to show.
           </div>

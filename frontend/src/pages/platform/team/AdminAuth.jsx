@@ -24,22 +24,16 @@ export default function AdminAuth() {
     const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "signup") {
-        await apiV2.post("/admin/signup", { email: cleanEmail, password });
-        toast.success("Account created — verify your email to continue.");
-        navigate(`/verify?role=admin&email=${encodeURIComponent(cleanEmail)}&next=/team/link-code`);
+        const res = await apiV2.post("/admin/signup", { email: cleanEmail, password });
+        await login("admin", res.data.token, res.data.admin);
+        navigate("/team/link-code", { replace: true });
       } else {
         const res = await apiV2.post("/admin/login", { email: cleanEmail, password });
         await login("admin", res.data.token, res.data.admin);
-        navigate(res.data.needs_code ? "/team/link-code" : "/team/home");
+        navigate(res.data.needs_code ? "/team/link-code" : "/team/home", { replace: true });
       }
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      if (err?.response?.status === 403) {
-        toast.info(formatApiError(detail));
-        navigate(`/verify?role=admin&email=${encodeURIComponent(cleanEmail)}&next=/team/link-code`);
-        return;
-      }
-      toast.error(formatApiError(detail));
+      toast.error(formatApiError(err?.response?.data?.detail));
     } finally {
       setSubmitting(false);
     }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Users, Plus, X } from "lucide-react";
+import { Users, Plus, X, RotateCcw } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { Button } from "@/components/ui/button";
@@ -49,8 +49,18 @@ export default function RosterSetup() {
     }
   };
 
+  const resetClaim = async (id, name) => {
+    try {
+      await apiV2.post(`/team/roster/${id}/unclaim`);
+      toast.success(`${name}'s slot was reset — they can rejoin with the team code.`);
+      await load();
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    }
+  };
+
   return (
-    <AuthShell icon={Users} title="Build your roster" subtitle="Add each player's name and contact info" backTo="/team" maxWidth="max-w-lg">
+    <AuthShell icon={Users} title="Build your roster" subtitle="Add each player's name and contact info" backTo="/team/home" maxWidth="max-w-lg">
       <form onSubmit={addPlayer} className="mb-5 flex flex-col gap-2 sm:flex-row">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Player name" data-testid="roster-player-name" className="flex-1" />
         <Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / email (optional)" data-testid="roster-player-contact" className="flex-1" />
@@ -65,11 +75,21 @@ export default function RosterSetup() {
           <div key={p.id} className="flex items-center justify-between rounded-xl border border-border bg-background px-4 py-2.5">
             <div>
               <p className="text-sm font-semibold">{p.name}</p>
-              {p.contact && <p className="text-xs text-muted-foreground">{p.contact}</p>}
+              <p className="text-xs text-muted-foreground">
+                {p.contact ? `${p.contact} · ` : ""}
+                <span className={p.joined ? "text-emerald-600 dark:text-emerald-400" : ""}>{p.joined ? "Joined" : "Not joined"}</span>
+              </p>
             </div>
-            <button onClick={() => removePlayer(p.id)} className="text-muted-foreground hover:text-destructive" aria-label={`Remove ${p.name}`}>
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              {p.joined && (
+                <button onClick={() => resetClaim(p.id, p.name)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" title="Reset their claim (e.g. lost device, wrong name)" aria-label={`Reset ${p.name}'s claim`}>
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button onClick={() => removePlayer(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label={`Remove ${p.name}`}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         ))}
       </div>

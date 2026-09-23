@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy, LogOut, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle } from "lucide-react";
+import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { RiskBadge } from "@/components/platform/RiskBadge";
+import { ExitConfirmButton } from "@/components/platform/ExitConfirmButton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 function CodeCard({ icon: Icon, label, code, hint }) {
@@ -81,7 +82,7 @@ function RankingRow({ p, rank, onOpen }) {
 
 export default function TeamHome() {
   const navigate = useNavigate();
-  const { user, logout } = usePlatformAuth();
+  const { user } = usePlatformAuth();
   const [codes, setCodes] = useState(null);
   const [dash, setDash] = useState(null);
 
@@ -109,12 +110,10 @@ export default function TeamHome() {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-5 pt-5 sm:px-8">
-        <div className="text-sm font-semibold text-muted-foreground">{user?.email}</div>
-        <div className="flex items-center gap-2">
+        <ExitConfirmButton />
+        <div className="flex items-center gap-3">
+          <span className="hidden text-sm font-semibold text-muted-foreground sm:inline">{user?.email}</span>
           <ThemeToggle />
-          <Button variant="ghost" size="icon" onClick={() => { logout(); navigate("/"); }} data-testid="admin-logout">
-            <LogOut className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 

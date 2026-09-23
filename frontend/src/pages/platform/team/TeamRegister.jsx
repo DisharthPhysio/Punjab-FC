@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { PlusCircle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
+import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { Label } from "@/components/ui/label";
 
 export default function TeamRegister() {
   const navigate = useNavigate();
+  const { login } = usePlatformAuth();
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,9 +22,9 @@ export default function TeamRegister() {
     setSubmitting(true);
     const cleanEmail = email.trim().toLowerCase();
     try {
-      await apiV2.post("/team/register", { team_name: teamName.trim(), email: cleanEmail, password });
-      toast.success("Team created — verify your email to continue.");
-      navigate(`/verify?role=team&email=${encodeURIComponent(cleanEmail)}&next=/team/roster-setup`);
+      const res = await apiV2.post("/team/register", { team_name: teamName.trim(), email: cleanEmail, password });
+      await login("admin", res.data.token, res.data.admin);
+      navigate("/team/roster-setup", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
     } finally {

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 
 export default function LinkTeamCode() {
   const navigate = useNavigate();
-  const { refresh } = usePlatformAuth();
+  const { refresh, teams } = usePlatformAuth();
+  const hasTeam = (teams?.length || 0) > 0;
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,7 +31,13 @@ export default function LinkTeamCode() {
   };
 
   return (
-    <AuthShell icon={KeyRound} title="Enter team access code" subtitle="Ask the team's admin for their 6-digit admin code" backTo="/team/admin-auth">
+    <AuthShell
+      icon={KeyRound}
+      title="Enter team access code"
+      subtitle="Ask the team's admin for their 6-digit admin code"
+      backTo={hasTeam ? "/team/home" : undefined}
+      exitConfirm={!hasTeam}
+    >
       <div className="space-y-6">
         <CodeInput value={code} onChange={setCode} />
         <Button className="w-full" size="lg" onClick={submit} disabled={submitting || code.length !== 6} data-testid="link-team-submit">
