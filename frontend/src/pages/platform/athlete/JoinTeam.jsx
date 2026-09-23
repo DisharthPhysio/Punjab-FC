@@ -8,9 +8,12 @@ import { AuthShell } from "@/components/platform/AuthShell";
 import { CodeInput } from "@/components/platform/CodeInput";
 import { Button } from "@/components/ui/button";
 
+/** No account needed for this path at all (item 3): the 6-digit code plus
+ * picking your name off the roster IS the credential. A long-lived token is
+ * then stored on this device so you don't have to repeat this every day. */
 export default function JoinTeam() {
   const navigate = useNavigate();
-  const { refresh } = usePlatformAuth();
+  const { login } = usePlatformAuth();
   const [step, setStep] = useState("code"); // "code" | "name"
   const [code, setCode] = useState("");
   const [team, setTeam] = useState(null);
@@ -22,12 +25,7 @@ export default function JoinTeam() {
     if (code.length !== 6) return toast.error("Enter the 6-digit team code");
     setSubmitting(true);
     try {
-      const res = await apiV2.post("/team/lookup", { code });
-      if (res.data.claimed) {
-        toast.success(`Welcome back to ${res.data.team.team_name}`);
-        navigate(`/athlete/team/${res.data.team.id}`, { replace: true });
-        return;
-      }
+      const res = await apiV2.post("/team/join", { code });
       setTeam(res.data.team);
       setPlayers(res.data.available_players);
       setStep("name");
@@ -42,10 +40,10 @@ export default function JoinTeam() {
     if (!selected) return toast.error("Select your name to continue");
     setSubmitting(true);
     try {
-      await apiV2.post("/team/claim", { code, player_id: selected });
-      await refresh();
+      const res = await apiV2.post("/team/select", { code, player_id: selected });
+      await login("team_athlete", res.data.token, res.data.player);
       toast.success(`You're in — welcome to ${team.team_name}!`);
-      navigate(`/athlete/team/${team.id}`, { replace: true });
+      navigate("/athlete/team", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
     } finally {
@@ -59,7 +57,7 @@ export default function JoinTeam() {
         <div className="space-y-2">
           {players.length === 0 && (
             <p className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
-              No unclaimed names left on this roster. Ask your team admin to add you.
+              No unclaimed names left on this roster. Ask your team admin to add you or reset your name.
             </p>
           )}
           {players.map((p) => {
@@ -87,7 +85,7 @@ export default function JoinTeam() {
   }
 
   return (
-    <AuthShell icon={Users} title="Join a team" subtitle="Enter the 6-digit code your team gave you" backTo="/athlete/mode">
+    <AuthShell icon={Users} title="Join a team" subtitle="Enter the 6-digit code your team gave you" backTo="/athlete">
       <div className="space-y-6">
         <CodeInput value={code} onChange={setCode} />
         <Button className="w-full" size="lg" onClick={lookup} disabled={submitting || code.length !== 6} data-testid="join-team-submit">

@@ -25,29 +25,22 @@ export default function AthleteAuth() {
     const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "signup") {
-        await apiV2.post("/athlete/signup", { name: name.trim(), email: cleanEmail, password });
-        toast.success("Account created — verify your email to continue.");
-        navigate(`/verify?role=athlete&email=${encodeURIComponent(cleanEmail)}&next=/athlete/mode`);
+        const res = await apiV2.post("/athlete/signup", { name: name.trim(), email: cleanEmail, password });
+        await login("athlete", res.data.token, res.data.athlete);
       } else {
         const res = await apiV2.post("/athlete/login", { email: cleanEmail, password });
         await login("athlete", res.data.token, res.data.athlete);
-        navigate("/athlete/mode");
       }
+      navigate("/athlete/checkin", { replace: true });
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      if (err?.response?.status === 403) {
-        toast.info(formatApiError(detail));
-        navigate(`/verify?role=athlete&email=${encodeURIComponent(cleanEmail)}&next=/athlete/mode`);
-        return;
-      }
-      toast.error(formatApiError(detail));
+      toast.error(formatApiError(err?.response?.data?.detail));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <AuthShell icon={User} title="Athlete sign in" subtitle="Use your personal email to continue">
+    <AuthShell icon={User} title="Individual athlete" subtitle="Use your personal email to continue" backTo="/athlete">
       <Tabs value={mode} onValueChange={setMode} className="mb-6">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="login" data-testid="athlete-tab-login">Log in</TabsTrigger>

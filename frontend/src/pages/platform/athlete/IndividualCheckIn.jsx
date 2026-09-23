@@ -15,7 +15,7 @@ export default function IndividualCheckIn() {
 
   const load = useCallback(async () => {
     try {
-      const res = await apiV2.get("/checkin/mine", { params: { context: "individual" } });
+      const res = await apiV2.get("/checkin/mine");
       setCheckins(res.data.checkins);
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
@@ -29,7 +29,7 @@ export default function IndividualCheckIn() {
 
   const handleSubmit = async (payload) => {
     try {
-      await apiV2.post("/checkin", { context: "individual", ...payload });
+      await apiV2.post("/checkin", payload);
       toast.success("Check-in logged!");
       await load();
     } catch (err) {
@@ -38,7 +38,7 @@ export default function IndividualCheckIn() {
   };
 
   return (
-    <AuthShell icon={ClipboardList} title="Individual check-in" subtitle="Takes under a minute" backTo="/athlete/mode" maxWidth="max-w-xl">
+    <AuthShell icon={ClipboardList} title="Individual check-in" subtitle="Takes under a minute" exitConfirm maxWidth="max-w-xl">
       <div className="space-y-8">
         {checkins === null ? (
           <div className="grid place-items-center py-10">

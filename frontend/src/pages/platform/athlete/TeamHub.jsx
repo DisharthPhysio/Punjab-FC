@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle2, Users } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
+import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { CheckInForm } from "@/components/platform/CheckInForm";
 import { CheckInHistory } from "@/components/platform/CheckInHistory";
@@ -14,18 +14,18 @@ function todayStr() {
 }
 
 export default function TeamHub() {
-  const { teamId } = useParams();
+  const { team } = usePlatformAuth();
   const [checkins, setCheckins] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await apiV2.get("/checkin/mine", { params: { context: "team", team_id: teamId } });
+      const res = await apiV2.get("/checkin/team/mine");
       setCheckins(res.data.checkins);
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
       setCheckins([]);
     }
-  }, [teamId]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -33,7 +33,7 @@ export default function TeamHub() {
 
   const handleSubmit = async (payload) => {
     try {
-      await apiV2.post("/checkin", { context: "team", team_id: teamId, ...payload });
+      await apiV2.post("/checkin/team", payload);
       toast.success("Check-in logged!");
       await load();
     } catch (err) {
@@ -42,7 +42,7 @@ export default function TeamHub() {
   };
 
   return (
-    <AuthShell icon={Users} title="Team check-in" backTo="/athlete/mode" maxWidth="max-w-xl">
+    <AuthShell icon={Users} title={team?.team_name || "Team check-in"} exitConfirm maxWidth="max-w-xl">
       <Tabs defaultValue="checkin">
         <TabsList className="mb-6 grid w-full grid-cols-2">
           <TabsTrigger value="checkin" data-testid="team-tab-checkin">Check-in</TabsTrigger>
@@ -72,7 +72,7 @@ export default function TeamHub() {
         </TabsContent>
 
         <TabsContent value="stats">
-          <StatsView teamId={teamId} />
+          <StatsView />
         </TabsContent>
       </Tabs>
     </AuthShell>
