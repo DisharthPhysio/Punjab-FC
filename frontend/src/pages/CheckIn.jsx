@@ -37,6 +37,7 @@ const Section = ({ icon: Icon, title, subtitle, children }) => (
 
 export default function CheckIn() {
   const [roster, setRoster] = useState([]);
+  const [checkedInToday, setCheckedInToday] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -63,9 +64,18 @@ export default function CheckIn() {
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
 
-  useEffect(() => {
+  const loadRosterStatus = () => {
     api.get("/roster").then((res) => setRoster(res.data)).catch(() => {});
+    // Public, read-only: which players have already submitted today (no health data) - lets us hide
+    // their name from the dropdown so nobody fills the form twice by mistake.
+    api.get("/roster/status").then((res) => setCheckedInToday(res.data.filter((a) => a.checkedIn).map((a) => a.name))).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadRosterStatus();
   }, []);
+
+  const availableRoster = roster.filter((a) => !checkedInToday.includes(a.name));
 
   const durationMin = Math.round(Number(duration)) || 0;
   const load = rpe && durationMin ? Number(rpe) * durationMin : 0;
@@ -98,6 +108,7 @@ export default function CheckIn() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
+      if (e.response?.status === 409) { setName(""); loadRosterStatus(); }
     } finally {
       setSubmitting(false);
     }
@@ -167,11 +178,21 @@ export default function CheckIn() {
               <SelectValue placeholder="Select your name" />
             </SelectTrigger>
             <SelectContent>
-              {roster.map((a) => (
+              {availableRoster.map((a) => (
                 <SelectItem key={a.id} value={a.name} data-testid={`athlete-option-${a.name}`}>{a.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {checkedInToday.length > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground" data-testid="already-checked-in-note">
+              Already checked in today, so not listed: {checkedInToday.join(", ")}. If yours needs fixing, ask your medical team.
+            </p>
+          )}
+          {roster.length > 0 && availableRoster.length === 0 && (
+            <p className="mt-2 text-sm font-medium text-emerald-600 dark:text-emerald-400" data-testid="all-checked-in-note">
+              Everyone on the squad has already checked in today. 🎉
+            </p>
+          )}
         </Section>
 
         {/* Sleep */}
