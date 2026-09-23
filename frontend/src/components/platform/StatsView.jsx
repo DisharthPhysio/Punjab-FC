@@ -84,16 +84,16 @@ export function StatsDisplay({ stats }) {
   );
 }
 
-export function StatsView({ teamId }) {
+export function StatsView() {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
     let active = true;
-    apiV2.get("/stats/mine", { params: { team_id: teamId } })
+    apiV2.get("/stats/team/mine")
       .then((res) => active && setStats(res.data))
       .catch((err) => toast.error(formatApiError(err?.response?.data?.detail)));
     return () => { active = false; };
-  }, [teamId]);
+  }, []);
 
   if (!stats) {
     return (

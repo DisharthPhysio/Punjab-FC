@@ -1,12 +1,17 @@
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BackButton } from "./BackButton";
+import { ExitConfirmButton } from "./ExitConfirmButton";
 
-export function AuthShell({ title, subtitle, icon: Icon, backTo, backFallback = "/", maxWidth = "max-w-md", children }) {
+/** exitConfirm: true for the page at the TOP of an authenticated area (asks
+ * before logging out). Otherwise pass backTo for a fixed, predictable
+ * destination -- every page must supply one explicitly now (item 9), there
+ * is no history-based fallback left to silently paper over a missing one. */
+export function AuthShell({ title, subtitle, icon: Icon, backTo = "/", exitConfirm = false, maxWidth = "max-w-md", children }) {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-5 pt-5 sm:px-8">
-        <BackButton to={backTo} fallback={backFallback} />
+        {exitConfirm ? <ExitConfirmButton /> : <BackButton to={backTo} />}
         <ThemeToggle />
       </div>
       <div className={`mx-auto ${maxWidth} px-5 pb-16 pt-8 sm:px-0`}>
