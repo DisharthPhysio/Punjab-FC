@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Lock, ArrowLeft, ShieldCheck } from "lucide-react";
 import api, { formatApiError } from "@/lib/api";
@@ -9,16 +9,12 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function CoachLogin() {
-  const { user, loading: authLoading, login } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("disharthjain98@gmail.com");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // Already signed in (e.g. came back here via the browser's back button) - go straight to the
-  // dashboard instead of showing the login form again, so the back button never re-shows a stale login.
-  if (!authLoading && user) return <Navigate to="/coach/dashboard" replace />;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -27,7 +23,7 @@ export default function CoachLogin() {
     try {
       const { data } = await api.post("/auth/login", { email, password });
       login(data.access_token, data.user);
-      navigate("/coach/dashboard", { replace: true });
+      navigate("/coach/dashboard");
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || "Login failed");
     } finally {

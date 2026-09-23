@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   LogOut, Download, Mail, Users, UserCheck, AlertTriangle, Zap, Plus, Trash2,
   RefreshCw, Search, Activity, Clock, TrendingUp, CalendarDays, ClipboardList,
-  ChevronLeft, ChevronRight, MessageCircle, Phone, FileText, ShieldCheck,
+  ChevronLeft, ChevronRight, MessageCircle, Phone,
 } from "lucide-react";
 import { format, parseISO, addDays } from "date-fns";
 import api, { formatApiError } from "@/lib/api";
@@ -15,7 +15,6 @@ import { AthleteTrendsDialog } from "@/components/AthleteTrendsDialog";
 import { ResponsesDialog } from "@/components/ResponsesDialog";
 import { RemindersDialog } from "@/components/RemindersDialog";
 import { PhoneNumbersDialog } from "@/components/PhoneNumbersDialog";
-import { TeamAccessDialog } from "@/components/TeamAccessDialog";
 import { TeamPainMap } from "@/components/TeamPainMap";
 import { reminderMessage, whatsappLink, loadReminded, saveReminded } from "@/lib/whatsapp";
 import { TrafficLightBadge, goodScaleStatus, loadStatus, sorenessStatus } from "@/components/TrafficLightBadge";
@@ -54,9 +53,8 @@ export default function CoachDashboard() {
   const [busy, setBusy] = useState(false);
   const [trendsFor, setTrendsFor] = useState(null);
   const [responsesOpen, setResponsesOpen] = useState(false);
-  const [dailyEmail, setDailyEmail] = useState({ enabled: false, hour: 20, recipients: [] });
-  const [weeklyDigest, setWeeklyDigest] = useState({ enabled: false, hour: 8, recipients: [] });
-  const [teamOpen, setTeamOpen] = useState(false);
+  const [dailyEmail, setDailyEmail] = useState({ enabled: false, hour: 20, recipient: "" });
+  const [weeklyDigest, setWeeklyDigest] = useState({ enabled: false, hour: 8, recipient: "" });
 
   // Calendar: "" means today, otherwise a past day as YYYY-MM-DD
   const [dateStr, setDateStr] = useState("");
@@ -153,7 +151,7 @@ export default function CoachDashboard() {
     saveReminded(todayStr, next);
   };
 
-  const doLogout = () => { logout(); navigate("/coach", { replace: true }); };
+  const doLogout = () => { logout(); navigate("/coach"); };
 
   const toggleDailyEmail = async (enabled) => {
     setDailyEmail((s) => ({ ...s, enabled }));
@@ -228,24 +226,6 @@ export default function CoachDashboard() {
       loadData();
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
-    }
-  };
-
-  const exportPdf = async () => {
-    setBusy(true);
-    try {
-      const res = await api.get("/export/pdf", { responseType: "blob", params: dateStr ? { date: dateStr } : {} });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Load and Recovery Monitoring Report - ${dateStr || data?.today || data?.date || "today"}.pdf`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-      toast.success("PDF report downloaded");
-    } catch (e) {
-      toast.error("PDF export failed");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -365,12 +345,6 @@ export default function CoachDashboard() {
             )}
             <Button variant="outline" size="sm" onClick={exportExcel} disabled={busy} className="gap-1.5" data-testid="export-excel-button">
               <Download className="h-4 w-4" /> Export Excel
-            </Button>
-            <Button variant="outline" size="sm" onClick={exportPdf} disabled={busy} className="gap-1.5" data-testid="export-pdf-button">
-              <FileText className="h-4 w-4" /> Export PDF
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setTeamOpen(true)} className="gap-1.5" data-testid="team-access-button">
-              <ShieldCheck className="h-4 w-4" /> Team Access
             </Button>
             <Button size="sm" onClick={sendReport} disabled={busy} className="gap-1.5" data-testid="send-report-button">
               <Mail className="h-4 w-4" /> Email Report
@@ -525,9 +499,7 @@ export default function CoachDashboard() {
                 <div>
                   <h3 className="text-lg font-bold">Automated Daily Email</h3>
                   <p className="text-xs text-muted-foreground">
-                    Emails the color-coded squad Excel report to {dailyEmail.recipients.length
-                      ? `${dailyEmail.recipients.length} Medical Team ${dailyEmail.recipients.length === 1 ? "account" : "accounts"}`
-                      : "your inbox"} every evening at ~8 PM.
+                    Emails the color-coded squad Excel report to {dailyEmail.recipient || "your inbox"} every evening at ~8 PM.
                   </p>
                 </div>
               </div>
@@ -608,7 +580,6 @@ export default function CoachDashboard() {
         onAddNumbers={() => { setRemindersOpen(false); setPhonesOpen(true); }}
       />
       <PhoneNumbersDialog open={phonesOpen} onOpenChange={setPhonesOpen} onChanged={loadData} />
-      <TeamAccessDialog open={teamOpen} onOpenChange={setTeamOpen} />
 
       <ResponsesDialog
         date={dateStr}
