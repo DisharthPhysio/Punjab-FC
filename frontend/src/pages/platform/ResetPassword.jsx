@@ -25,7 +25,7 @@ export default function ResetPassword() {
     try {
       await apiV2.post(`/${role}/reset-password`, { email, code, new_password: newPassword });
       toast.success("Password updated — please log in.");
-      navigate(role === "athlete" ? "/athlete/auth" : "/team/admin-auth", { replace: true });
+      navigate(role === "athlete" ? "/athlete/individual" : "/team/admin-auth", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
     } finally {
@@ -34,7 +34,7 @@ export default function ResetPassword() {
   };
 
   return (
-    <AuthShell icon={ShieldCheck} title="Reset password" subtitle={`Code sent to ${email || "your email"}`}>
+    <AuthShell icon={ShieldCheck} title="Reset password" subtitle={`Code sent to ${email || "your email"}`} backTo={role === "admin" ? "/team/admin-auth" : "/athlete/individual"}>
       <form onSubmit={handleSubmit} className="space-y-6">
         <CodeInput value={code} onChange={setCode} />
         <div className="space-y-1.5">

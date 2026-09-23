@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
 import { motion } from "framer-motion";
 import { User, ShieldCheck, Activity, ChevronRight } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -9,7 +10,7 @@ const OPTIONS = [
     title: "I'm an Athlete",
     desc: "Log your daily check-in, on your own or as part of a team.",
     icon: User,
-    to: "/athlete/auth",
+    to: "/athlete",
   },
   {
     key: "team",
@@ -20,12 +21,29 @@ const OPTIONS = [
   },
 ];
 
+const LONG_PRESS_MS = 5000;
+
 export default function Landing() {
   const navigate = useNavigate();
+  const pressTimer = useRef(null);
+
+  // Hidden site-admin entry point: press and hold the title for 5 seconds.
+  const startPress = () => {
+    clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => navigate("/superadmin/login"), LONG_PRESS_MS);
+  };
+  const cancelPress = () => clearTimeout(pressTimer.current);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-5 pt-5 sm:px-8">
-        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+        <div
+          className="flex items-center gap-2 text-sm font-semibold text-muted-foreground select-none"
+          onPointerDown={startPress}
+          onPointerUp={cancelPress}
+          onPointerLeave={cancelPress}
+          onPointerCancel={cancelPress}
+        >
           <Activity className="h-4 w-4 text-primary" />
           Load &amp; Recovery Platform
         </div>

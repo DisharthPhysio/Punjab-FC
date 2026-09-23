@@ -30,7 +30,7 @@ export default function ForgotPassword() {
   };
 
   return (
-    <AuthShell icon={KeyRound} title="Forgot password" subtitle="We'll email you a code to reset it.">
+    <AuthShell icon={KeyRound} title="Forgot password" subtitle="We'll email you a code to reset it." backTo={role === "admin" ? "/team/admin-auth" : "/athlete/individual"}>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="fp-email">Email</Label>
