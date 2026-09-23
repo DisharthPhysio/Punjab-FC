@@ -25,6 +25,7 @@ Auth model:
 """
 import re
 import secrets
+import statistics
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
@@ -112,6 +113,50 @@ def code_is_valid(stored_code: Optional[str], stored_expiry: Optional[str], subm
     if not stored_code or stored_code != (submitted or "").strip():
         return False
     return _parse_iso(stored_expiry) >= _now_utc()
+
+
+# Same Foster (1998) formula as the legacy single-team dashboard (server.py's week_stats),
+# duplicated here (rather than imported) to keep this module import-cycle-free.
+MONOTONY_WATCH = 1.5
+MONOTONY_HIGH = 2.0
+
+
+def week_stats(daily_loads: List[int]) -> dict:
+    """monotony = mean daily load / stdev daily load (sample SD); strain = weekly load x monotony.
+    None when the week has no load, or every day is identical (SD = 0 -> undefined)."""
+    total = sum(daily_loads)
+    out = {"load": total, "daysLogged": sum(1 for x in daily_loads if x > 0),
+           "monotony": None, "strain": None, "monotonyRisk": None}
+    if total <= 0 or len(daily_loads) < 2:
+        return out
+    sd = statistics.stdev(daily_loads)
+    if sd == 0:
+        return out
+    mono_raw = (total / len(daily_loads)) / sd
+    mono = round(mono_raw, 2)
+    out["monotony"] = mono
+    out["strain"] = int(round(total * mono_raw))
+    out["monotonyRisk"] = "red" if mono >= MONOTONY_HIGH else ("amber" if mono >= MONOTONY_WATCH else "green")
+    return out
+
+
+def change_pct(current, previous):
+    return int(round((current - previous) / previous * 100)) if previous and previous > 0 else None
+
+
+def readiness_score(c: Optional[dict]) -> Optional[int]:
+    """0-100 composite: sleep 30%, hydration 25%, motivation 25%, inverse soreness 20%, illness penalty.
+    None when the day has no check-in (not zero — an unlogged day isn't 'low readiness', it's unknown)."""
+    if not c:
+        return None
+    sleep_q, hyd, mot = c.get("sleepQuality"), c.get("hydration"), c.get("motivation")
+    if not sleep_q or not hyd or not mot:
+        return None
+    soreness = c.get("sorenessSeverity") or 0
+    score = 100 * (0.30 * sleep_q / 5 + 0.25 * hyd / 5 + 0.25 * mot / 5 + 0.20 * (5 - soreness) / 5)
+    if c.get("feelingIll"):
+        score -= 20
+    return max(0, min(100, round(score)))
 
 
 def make_token(sub: str, ttype: str, days: int = 30) -> str:
@@ -663,3 +708,154 @@ async def my_checkins(context: Optional[str] = None, team_id: Optional[str] = No
         query["team_id"] = team_id
     rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(min(limit, 200))
     return {"checkins": rows}
+
+
+async def _compute_athlete_stats(athlete_id: str, team_id: str, player_name: str) -> dict:
+    """Shared by /stats/mine (athlete viewing their own numbers) and the admin-facing
+    player detail endpoint — same numbers, same formula, viewed from either side."""
+    today = datetime.strptime(_today_str(), "%Y-%m-%d").date()
+    window_start = (today - timedelta(days=41)).strftime("%Y-%m-%d")  # 6 weeks of history for the chart
+    rows = await _db.checkins_v2.find(
+        {"athlete_id": athlete_id, "context": "team", "team_id": team_id, "date": {"$gte": window_start}},
+        {"_id": 0},
+    ).to_list(200)
+    by_date = {r["date"]: r for r in rows}
+
+    def day(offset_from_today: int) -> str:
+        return (today - timedelta(days=offset_from_today)).strftime("%Y-%m-%d")
+
+    daily_series = []
+    for i in range(41, -1, -1):  # oldest -> newest
+        d = day(i)
+        r = by_date.get(d)
+        daily_series.append({"date": d, "load": (r.get("load") or 0) if r else 0, "readiness": readiness_score(r)})
+
+    last28 = daily_series[-28:]
+    last28_loads = [pt["load"] for pt in last28]
+    last7_loads = [pt["load"] for pt in daily_series[-7:]]
+    prev7_loads = [pt["load"] for pt in daily_series[-14:-7]]
+
+    nonzero_28 = [x for x in last28_loads if x > 0]
+    avg_load = round(sum(nonzero_28) / len(nonzero_28)) if nonzero_28 else 0
+    peak_load = max(last28_loads) if last28_loads else 0
+
+    this_week = week_stats(last7_loads)
+    prev_week = week_stats(prev7_loads)
+    this_week["changePct"] = change_pct(this_week["load"], prev_week["load"])
+
+    chronic_avg = sum(last28_loads) / 28
+    acute_avg = sum(last7_loads) / 7
+    acwr = round(acute_avg / chronic_avg, 2) if chronic_avg > 0 else None
+    acwr_risk = None
+    if acwr is not None:
+        acwr_risk = "red" if acwr > 1.5 else ("amber" if (acwr >= 1.3 or acwr < 0.8) else "green")
+
+    this_week_readi = [pt["readiness"] for pt in daily_series[-7:] if pt["readiness"] is not None]
+    prev_week_readi = [pt["readiness"] for pt in daily_series[-14:-7] if pt["readiness"] is not None]
+    readiness_week_avg = round(sum(this_week_readi) / len(this_week_readi)) if this_week_readi else None
+    readiness_prev_avg = round(sum(prev_week_readi) / len(prev_week_readi)) if prev_week_readi else None
+    readiness_trend = (readiness_week_avg - readiness_prev_avg) if (readiness_week_avg is not None and readiness_prev_avg is not None) else None
+
+    today_row = by_date.get(_today_str())
+    return {
+        "player_name": player_name,
+        "avgLoad": avg_load, "peakLoad": peak_load,
+        "weekLoad": this_week["load"], "weekChangePct": this_week["changePct"],
+        "monotony": this_week["monotony"], "strain": this_week["strain"], "monotonyRisk": this_week["monotonyRisk"],
+        "acwr": acwr, "acwrRisk": acwr_risk,
+        "readinessToday": readiness_score(today_row),
+        "readinessWeekAvg": readiness_week_avg, "readinessPrevWeekAvg": readiness_prev_avg,
+        "readinessTrend": readiness_trend,
+        "dailySeries": last28,
+        "checkedInToday": today_row is not None,
+        "todayCheckin": today_row,
+    }
+
+
+RISK_LEVEL = lambda score: "red" if score >= 50 else ("amber" if score >= 25 else "green")
+
+
+def _risk_score(stats: dict) -> int:
+    """0-100+ composite used to rank players by concern (item 6/7's ranking system).
+    Combines load-spike risk (ACWR), fatigue-accumulation risk (monotony) and today's
+    subjective signals (illness, soreness, low readiness). Not a medical diagnosis —
+    a triage aid to point medical staff at who to check on first."""
+    score = 0
+    score += {"red": 40, "amber": 15}.get(stats.get("acwrRisk"), 0)
+    score += {"red": 25, "amber": 10}.get(stats.get("monotonyRisk"), 0)
+    today = stats.get("todayCheckin")
+    if today:
+        if today.get("feelingIll"):
+            score += 20
+        score += (today.get("sorenessSeverity") or 0) * 4
+        r = stats.get("readinessToday")
+        if r is not None:
+            if r < 50:
+                score += 15
+            elif r < 70:
+                score += 5
+    return score
+
+
+@platform_router.get("/stats/mine")
+async def my_stats(team_id: str, athlete: dict = Depends(get_current_athlete)):
+    """A team athlete's own load & readiness picture (item 4): average/peak/week-total load,
+    monotony, strain, ACWR, readiness vs. the previous week, and a daily series to chart."""
+    player = await _db.team_players.find_one({"team_id": team_id, "claimed_by_athlete_id": athlete["id"]})
+    if not player:
+        raise HTTPException(403, "You haven't joined this team yet")
+    stats = await _compute_athlete_stats(athlete["id"], team_id, player["name"])
+    stats.pop("todayCheckin", None)  # internal-only field used for risk scoring
+    return stats
+
+
+@platform_router.get("/team/dashboard")
+async def team_dashboard(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    """The command centre's player-card grid + the data the ranking view sorts on (items 6/7)."""
+    team = await _admins_team(admin, team_id)
+    players = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+
+    out = []
+    for p in players:
+        entry = {"id": p["id"], "name": p["name"], "contact": p.get("contact", ""),
+                  "joined": bool(p.get("claimed_by_athlete_id"))}
+        if p.get("claimed_by_athlete_id"):
+            stats = await _compute_athlete_stats(p["claimed_by_athlete_id"], team["id"], p["name"])
+            risk = _risk_score(stats)
+            today = stats.pop("todayCheckin", None)
+            entry.update(stats)
+            entry["riskScore"] = risk
+            entry["riskLevel"] = RISK_LEVEL(risk)
+            if today:
+                entry["today"] = {
+                    "sleepQuality": today.get("sleepQuality"), "sleepHours": today.get("sleepHours"),
+                    "hydration": today.get("hydration"), "motivation": today.get("motivation"),
+                    "feelingIll": today.get("feelingIll"), "symptoms": today.get("symptoms", []),
+                    "sorenessAreas": today.get("sorenessAreas", []), "sorenessSeverity": today.get("sorenessSeverity", 0),
+                }
+        else:
+            entry.update({"riskScore": None, "riskLevel": None, "checkedInToday": False, "today": None})
+        out.append(entry)
+
+    checked_in = sum(1 for a in out if a.get("checkedInToday"))
+    flagged = sum(1 for a in out if a.get("riskLevel") == "red")
+    return {"team_name": team["team_name"], "summary": {"total": len(out), "checkedIn": checked_in, "flagged": flagged}, "players": out}
+
+
+@platform_router.get("/team/player/{player_id}")
+async def team_player_detail(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0})
+    if not player:
+        raise HTTPException(404, "Player not found")
+    if not player.get("claimed_by_athlete_id"):
+        return {"player": player, "stats": None, "checkins": []}
+    stats = await _compute_athlete_stats(player["claimed_by_athlete_id"], team["id"], player["name"])
+    risk = _risk_score(stats)
+    stats["riskScore"] = risk
+    stats["riskLevel"] = RISK_LEVEL(risk)
+    stats.pop("todayCheckin", None)
+    checkins = await _db.checkins_v2.find(
+        {"athlete_id": player["claimed_by_athlete_id"], "context": "team", "team_id": team["id"]}, {"_id": 0}
+    ).sort("date", -1).to_list(30)
+    return {"player": player, "stats": stats, "checkins": checkins}
