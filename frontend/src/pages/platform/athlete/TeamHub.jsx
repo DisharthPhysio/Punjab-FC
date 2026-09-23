@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { CheckCircle2, Users, BarChart3 } from "lucide-react";
+import { CheckCircle2, Users } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { CheckInForm } from "@/components/platform/CheckInForm";
 import { CheckInHistory } from "@/components/platform/CheckInHistory";
+import { StatsView } from "@/components/platform/StatsView";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 function todayStr() {
@@ -71,14 +72,7 @@ export default function TeamHub() {
         </TabsContent>
 
         <TabsContent value="stats">
-          <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
-            <BarChart3 className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="font-bold">Your full stats are coming next</p>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-              Average &amp; peak load, monotony, strain, readiness vs. last week, and your daily load chart —
-              this is built in Phase 3, right after this auth foundation ships.
-            </p>
-          </div>
+          <StatsView teamId={teamId} />
         </TabsContent>
       </Tabs>
     </AuthShell>
