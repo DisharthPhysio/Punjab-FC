@@ -25,6 +25,7 @@ import RosterSetup from "@/pages/platform/team/RosterSetup";
 import TeamHome from "@/pages/platform/team/TeamHome";
 import AdminAuth from "@/pages/platform/team/AdminAuth";
 import LinkTeamCode from "@/pages/platform/team/LinkTeamCode";
+import PlayerDetail from "@/pages/platform/team/PlayerDetail";
 
 function Spinner() {
   return (
@@ -81,6 +82,7 @@ function App() {
               <Route path="/team/link-code" element={<AdminRoute><LinkTeamCode /></AdminRoute>} />
               <Route path="/team/roster-setup" element={<AdminRoute requireTeam><RosterSetup /></AdminRoute>} />
               <Route path="/team/home" element={<AdminRoute requireTeam><TeamHome /></AdminRoute>} />
+              <Route path="/team/player/:playerId" element={<AdminRoute requireTeam><PlayerDetail /></AdminRoute>} />
 
               {/* ---- legacy single-team flow, kept alive during the transition ---- */}
               <Route path="/legacy" element={<CheckIn />} />
