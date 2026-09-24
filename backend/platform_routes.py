@@ -1,28 +1,31 @@
 """
-Phase 1 — multi-tenant platform routes (Athlete / Team / Admin).
+Multi-tenant platform routes (Athlete / Team / Admin / Super Admin).
 
-This module is deliberately kept separate from server.py's original single-team
-coach routes so the existing (working, tested) code path is left untouched.
-server.py calls init(...) once at import time to hand over its already-built
-db handle, email sender, password helpers, JWT secret, and day/time helpers,
-then mounts `platform_router` alongside its own `api_router`.
+Kept separate from server.py's original single-team coach routes so that
+code path is left untouched. server.py calls init(...) once at import time
+to hand over its already-built db handle, email sender, password helpers,
+JWT secret, and day/time helpers, then mounts `platform_router`.
 
-New collections introduced here:
-  athletes       - individual athlete accounts (email + password)
-  admins         - team-owner / admin accounts (email + password)
-  teams          - one doc per team: name, 6-digit athlete_code, 6-digit admin_code
-  team_players   - roster slots an admin creates; an athlete "claims" one by name
-  checkins_v2    - daily check-ins, either context="individual" or context="team"
+Auth model (v2, simplified — no email verification step anywhere):
+  - An individual Athlete has their own email/password account (JWT type="athlete").
+    Signup logs them in immediately — no confirmation code.
+  - A Team athlete needs NO account at all: enter the team's 6-digit athlete
+    code, pick your name off the roster once, and a long-lived token
+    (JWT type="team_athlete", carrying team_id + a per-claim secret) is issued
+    and stored on that device. No email, no password.
+  - A Team is created by an Admin (email/password, JWT type="admin"), also
+    logged in immediately on signup. A *different* person who needs access to
+    an existing team (e.g. a physio) creates their own admin account (also no
+    verification) and links it to that team with the team's 6-digit admin code.
+  - A hidden Super Admin (fixed, seeded credentials) can list and remove any
+    athlete/admin account, or reset a team athlete's claim on their roster
+    slot — the moderation safety net now that signup has no verification gate.
 
-Auth model:
-  - An Athlete always authenticates with their own email/password (JWT type="athlete").
-    From their account they can check in individually AND/OR join any number of teams
-    by entering that team's 6-digit athlete code and confirming their name on the roster.
-  - A Team is created by an Admin (email/password, JWT type="admin"). Registering a new
-    team both creates the team and verifies that admin as its owner. A *different* person
-    who needs access to an existing team (e.g. a physio) creates their own admin account
-    and links it to that team by entering the team's 6-digit admin code.
+Password reset (forgot-password) still uses an emailed code — that is a
+different, still-justified security control (proving you own the email
+before changing a password), independent of the removed signup verification.
 """
+import os
 import re
 import secrets
 import statistics
@@ -48,6 +51,8 @@ _today_str = None
 
 CODE_TTL_MINUTES = 15
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SUPER_ADMIN_EMAIL_DEFAULT = "disharthjain98@gmail.com"
+SUPER_ADMIN_PASSWORD_DEFAULT = "Disharth10@"
 
 
 def init(db, send_email, hash_password, verify_password, jwt_secret, jwt_algorithm, now_utc, today_str):
@@ -66,13 +71,21 @@ async def ensure_indexes():
     """Called once from server.py's startup event."""
     await _db.athletes.create_index("email", unique=True)
     await _db.admins.create_index("email", unique=True)
+    await _db.superadmins.create_index("email", unique=True)
     await _db.teams.create_index("athlete_code", unique=True)
     await _db.teams.create_index("admin_code", unique=True)
     await _db.team_players.create_index([("team_id", 1)])
-    await _db.team_players.create_index([("claimed_by_athlete_id", 1)])
     await _db.checkins_v2.create_index(
-        [("athlete_id", 1), ("context", 1), ("team_id", 1), ("date", 1)], unique=True
+        [("athlete_id", 1), ("team_player_id", 1), ("context", 1), ("date", 1)], unique=True
     )
+    # Seed the hidden super admin account (env vars override the defaults given at build time).
+    email = os.environ.get("SUPER_ADMIN_EMAIL", SUPER_ADMIN_EMAIL_DEFAULT).strip().lower()
+    password = os.environ.get("SUPER_ADMIN_PASSWORD", SUPER_ADMIN_PASSWORD_DEFAULT)
+    if not await _db.superadmins.find_one({"email": email}):
+        await _db.superadmins.insert_one({
+            "id": str(uuid.uuid4()), "email": email, "password_hash": _hash_password(password),
+            "created_at": _now_utc().isoformat(),
+        })
 
 
 # ---------- small helpers ----------
@@ -110,6 +123,8 @@ def _parse_iso(s: Optional[str]) -> datetime:
 
 
 def code_is_valid(stored_code: Optional[str], stored_expiry: Optional[str], submitted: str) -> bool:
+    """Still used for forgot/reset-password, which keeps its emailed-code check
+    even though signup verification was removed — different security purpose."""
     if not stored_code or stored_code != (submitted or "").strip():
         return False
     return _parse_iso(stored_expiry) >= _now_utc()
@@ -122,8 +137,6 @@ MONOTONY_HIGH = 2.0
 
 
 def week_stats(daily_loads: List[int]) -> dict:
-    """monotony = mean daily load / stdev daily load (sample SD); strain = weekly load x monotony.
-    None when the week has no load, or every day is identical (SD = 0 -> undefined)."""
     total = sum(daily_loads)
     out = {"load": total, "daysLogged": sum(1 for x in daily_loads if x > 0),
            "monotony": None, "strain": None, "monotonyRisk": None}
@@ -145,8 +158,6 @@ def change_pct(current, previous):
 
 
 def readiness_score(c: Optional[dict]) -> Optional[int]:
-    """0-100 composite: sleep 30%, hydration 25%, motivation 25%, inverse soreness 20%, illness penalty.
-    None when the day has no check-in (not zero — an unlogged day isn't 'low readiness', it's unknown)."""
     if not c:
         return None
     sleep_q, hyd, mot = c.get("sleepQuality"), c.get("hydration"), c.get("motivation")
@@ -159,8 +170,9 @@ def readiness_score(c: Optional[dict]) -> Optional[int]:
     return max(0, min(100, round(score)))
 
 
-def make_token(sub: str, ttype: str, days: int = 30) -> str:
+def make_token(sub: str, ttype: str, days: int = 30, **extra) -> str:
     payload = {"sub": sub, "type": ttype, "exp": _now_utc() + timedelta(days=days)}
+    payload.update(extra)
     return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
 
 
@@ -203,6 +215,30 @@ async def get_current_admin(request: Request) -> dict:
     return admin
 
 
+async def get_current_team_athlete(request: Request) -> dict:
+    """No email/password behind this — the JWT (issued once at /team/select) plus a
+    per-claim secret checked against team_players.claim_token IS the credential.
+    If a team admin or the super admin resets the claim, this secret stops matching
+    and the token is silently invalidated, forcing a rejoin with the code."""
+    payload = decode_token(bearer_token(request))
+    if payload.get("type") != "team_athlete":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    player = await _db.team_players.find_one({"id": payload["sub"]}, {"_id": 0})
+    if not player or not player.get("claim_token") or player["claim_token"] != payload.get("ct"):
+        raise HTTPException(status_code=401, detail="Your access was reset — please rejoin with your team's code.")
+    return player
+
+
+async def get_current_superadmin(request: Request) -> dict:
+    payload = decode_token(bearer_token(request))
+    if payload.get("type") != "superadmin":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    sa = await _db.superadmins.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+    if not sa:
+        raise HTTPException(status_code=401, detail="Account not found")
+    return sa
+
+
 async def _admins_team(admin: dict, team_id: Optional[str] = None) -> dict:
     ids = admin.get("team_ids") or []
     if not ids:
@@ -216,7 +252,7 @@ async def _admins_team(admin: dict, team_id: Optional[str] = None) -> dict:
     return team
 
 
-# ---------- email templates ----------
+# ---------- email templates (forgot/reset-password only now) ----------
 def _code_email_html(title: str, code: str, note: str) -> str:
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;">
@@ -231,17 +267,17 @@ def _code_email_html(title: str, code: str, note: str) -> str:
     </div>"""
 
 
-async def send_code_email(to_email: str, code: str, purpose: Literal["verify", "reset"]):
-    if purpose == "verify":
-        subject = "Verify your email"
-        html = _code_email_html("Confirm your email", code, "Enter this code to verify your account.")
-    else:
-        subject = "Your password reset code"
-        html = _code_email_html("Reset your password", code, "Enter this code to set a new password.")
-    await _send_email(subject, html, to=[to_email])
+async def send_reset_code_email(to_email: str, code: str):
+    html = _code_email_html("Reset your password", code, "Enter this code to set a new password.")
+    await _send_email("Your password reset code", html, to=[to_email])
 
 
-# ---------- payload models ----------
+def _password_ok(pw: str):
+    if len(pw or "") < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+
+# ================= payload models =================
 class AthleteSignup(BaseModel):
     name: str
     email: str
@@ -264,11 +300,6 @@ class LoginPayload(BaseModel):
     password: str
 
 
-class VerifyPayload(BaseModel):
-    email: str
-    code: str
-
-
 class ForgotPayload(BaseModel):
     email: str
 
@@ -288,14 +319,12 @@ class TeamCodePayload(BaseModel):
     code: str
 
 
-class ClaimPayload(BaseModel):
+class SelectPlayerPayload(BaseModel):
     code: str
     player_id: str
 
 
-class CheckInV2Payload(BaseModel):
-    context: Literal["individual", "team"]
-    team_id: Optional[str] = None
+class CheckInPayload(BaseModel):
     sleepHours: Optional[float] = None
     sleepQuality: int
     sleepNotes: Optional[str] = ""
@@ -317,12 +346,23 @@ class CheckInV2Payload(BaseModel):
     notes: Optional[str] = ""
 
 
-def _password_ok(pw: str):
-    if len(pw or "") < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
+class SuperAdminLoginPayload(BaseModel):
+    email: str
+    password: str
 
 
-# ================= Athlete auth =================
+class EmailSummaryPayload(BaseModel):
+    team_id: str
+    to_email: str
+
+
+def _load_from_payload(payload: CheckInPayload) -> Optional[int]:
+    if payload.logSession and payload.rpe and payload.duration:
+        return payload.rpe * payload.duration
+    return None
+
+
+# ================= Athlete auth (individual only — no verification step) =================
 @platform_router.post("/athlete/signup")
 async def athlete_signup(payload: AthleteSignup):
     email = norm_email(payload.email)
@@ -331,40 +371,17 @@ async def athlete_signup(payload: AthleteSignup):
     if not payload.name.strip():
         raise HTTPException(400, "Enter your name")
     _password_ok(payload.password)
-
-    existing = await _db.athletes.find_one({"email": email})
-    code = gen_code()
-    if existing:
-        if existing.get("verified"):
-            raise HTTPException(409, "An account with this email already exists. Try logging in.")
-        await _db.athletes.update_one({"email": email}, {"$set": {
-            "name": payload.name.strip(), "password_hash": _hash_password(payload.password),
-            "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-        }})
-    else:
-        await _db.athletes.insert_one({
-            "id": str(uuid.uuid4()), "name": payload.name.strip(), "email": email,
-            "password_hash": _hash_password(payload.password), "verified": False,
-            "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-            "reset_code": None, "reset_code_expires": None,
-            "created_at": _now_utc().isoformat(),
-        })
-    await send_code_email(email, code, "verify")
-    return {"message": "Verification code sent to your email."}
-
-
-@platform_router.post("/athlete/verify")
-async def athlete_verify(payload: VerifyPayload):
-    email = norm_email(payload.email)
-    athlete = await _db.athletes.find_one({"email": email})
-    if not athlete:
-        raise HTTPException(404, "Account not found")
-    if not athlete.get("verified"):
-        if not code_is_valid(athlete.get("verify_code"), athlete.get("verify_code_expires"), payload.code):
-            raise HTTPException(400, "That code is invalid or has expired.")
-        await _db.athletes.update_one({"email": email}, {"$set": {"verified": True, "verify_code": None, "verify_code_expires": None}})
-    token = make_token(athlete["id"], "athlete")
-    return {"token": token, "athlete": {"id": athlete["id"], "name": athlete["name"], "email": email}}
+    if await _db.athletes.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists. Try logging in.")
+    athlete_id = str(uuid.uuid4())
+    await _db.athletes.insert_one({
+        "id": athlete_id, "name": payload.name.strip(), "email": email,
+        "password_hash": _hash_password(payload.password),
+        "reset_code": None, "reset_code_expires": None,
+        "created_at": _now_utc().isoformat(),
+    })
+    token = make_token(athlete_id, "athlete")
+    return {"token": token, "athlete": {"id": athlete_id, "name": payload.name.strip(), "email": email}}
 
 
 @platform_router.post("/athlete/login")
@@ -373,11 +390,6 @@ async def athlete_login(payload: LoginPayload):
     athlete = await _db.athletes.find_one({"email": email})
     if not athlete or not _verify_password(payload.password, athlete["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
-    if not athlete.get("verified"):
-        code = gen_code()
-        await _db.athletes.update_one({"email": email}, {"$set": {"verify_code": code, "verify_code_expires": code_expiry().isoformat()}})
-        await send_code_email(email, code, "verify")
-        raise HTTPException(403, "Please verify your email first — we've sent a new code.")
     token = make_token(athlete["id"], "athlete")
     return {"token": token, "athlete": {"id": athlete["id"], "name": athlete["name"], "email": email}}
 
@@ -389,7 +401,7 @@ async def athlete_forgot(payload: ForgotPayload):
     if athlete:
         code = gen_code()
         await _db.athletes.update_one({"email": email}, {"$set": {"reset_code": code, "reset_code_expires": code_expiry().isoformat()}})
-        await send_code_email(email, code, "reset")
+        await send_reset_code_email(email, code)
     return {"message": "If an account exists for that email, a reset code has been sent."}
 
 
@@ -409,52 +421,44 @@ async def athlete_reset(payload: ResetPayload):
 
 @platform_router.get("/athlete/me")
 async def athlete_me(athlete: dict = Depends(get_current_athlete)):
-    memberships = await _db.team_players.find({"claimed_by_athlete_id": athlete["id"]}, {"_id": 0}).to_list(20)
-    team_ids = list({m["team_id"] for m in memberships})
-    names = {}
-    if team_ids:
-        async for t in _db.teams.find({"id": {"$in": team_ids}}, {"_id": 0, "id": 1, "team_name": 1}):
-            names[t["id"]] = t["team_name"]
-    for m in memberships:
-        m["team_name"] = names.get(m["team_id"], "Team")
-    return {"athlete": athlete, "teams": memberships}
+    return {"athlete": athlete}
 
 
-# ================= Team join (by an authenticated athlete) =================
-@platform_router.post("/team/lookup")
-async def team_lookup(payload: TeamCodePayload, athlete: dict = Depends(get_current_athlete)):
+# ================= Team athlete: code + pick your name, no account at all =================
+@platform_router.post("/team/join")
+async def team_join(payload: TeamCodePayload):
     team = await _db.teams.find_one({"athlete_code": payload.code.strip()}, {"_id": 0})
     if not team:
         raise HTTPException(404, "No team found for that code")
-    mine = await _db.team_players.find_one({"team_id": team["id"], "claimed_by_athlete_id": athlete["id"]}, {"_id": 0})
-    if mine:
-        return {"team": {"id": team["id"], "team_name": team["team_name"]}, "claimed": mine, "available_players": []}
     players = await _db.team_players.find(
-        {"team_id": team["id"], "claimed_by_athlete_id": None}, {"_id": 0}
+        {"team_id": team["id"], "claim_token": None}, {"_id": 0, "claim_token": 0}
     ).sort("name", 1).to_list(500)
-    return {"team": {"id": team["id"], "team_name": team["team_name"]}, "claimed": None, "available_players": players}
+    return {"team": {"id": team["id"], "team_name": team["team_name"]}, "available_players": players}
 
 
-@platform_router.post("/team/claim")
-async def team_claim(payload: ClaimPayload, athlete: dict = Depends(get_current_athlete)):
+@platform_router.post("/team/select")
+async def team_select(payload: SelectPlayerPayload):
     team = await _db.teams.find_one({"athlete_code": payload.code.strip()})
     if not team:
         raise HTTPException(404, "No team found for that code")
     player = await _db.team_players.find_one({"id": payload.player_id, "team_id": team["id"]})
     if not player:
         raise HTTPException(404, "Player not found on this team's roster")
-    if player.get("claimed_by_athlete_id") and player["claimed_by_athlete_id"] != athlete["id"]:
-        raise HTTPException(409, "That name has already been claimed by another athlete. Contact your team admin.")
-    already = await _db.team_players.find_one({"team_id": team["id"], "claimed_by_athlete_id": athlete["id"]})
-    if already and already["id"] != player["id"]:
-        raise HTTPException(409, f"You're already registered on this team as {already['name']}.")
-    await _db.team_players.update_one({"id": player["id"]}, {"$set": {"claimed_by_athlete_id": athlete["id"]}})
-    player["claimed_by_athlete_id"] = athlete["id"]
-    player.pop("_id", None)
-    return {"team": {"id": team["id"], "team_name": team["team_name"]}, "player": player}
+    if player.get("claim_token"):
+        raise HTTPException(409, "That name has already been claimed. Ask your team admin to reset it if it's you.")
+    claim_token = secrets.token_urlsafe(16)
+    await _db.team_players.update_one({"id": player["id"]}, {"$set": {"claim_token": claim_token, "claimed_at": _now_utc().isoformat()}})
+    token = make_token(player["id"], "team_athlete", days=365, team_id=team["id"], ct=claim_token)
+    return {"token": token, "team": {"id": team["id"], "team_name": team["team_name"]}, "player": {"id": player["id"], "name": player["name"]}}
 
 
-# ================= Team registration & Admin auth =================
+@platform_router.get("/team/mine")
+async def team_mine(player: dict = Depends(get_current_team_athlete)):
+    team = await _db.teams.find_one({"id": player["team_id"]}, {"_id": 0, "id": 1, "team_name": 1})
+    return {"team": team, "player": {"id": player["id"], "name": player["name"]}}
+
+
+# ================= Team registration & Admin auth (no verification step) =================
 @platform_router.post("/team/register")
 async def team_register(payload: TeamRegisterPayload):
     email = norm_email(payload.email)
@@ -463,105 +467,46 @@ async def team_register(payload: TeamRegisterPayload):
     if not payload.team_name.strip():
         raise HTTPException(400, "Enter a team name")
     _password_ok(payload.password)
+    if await _db.admins.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists. Try Admin Access instead.")
 
-    existing = await _db.admins.find_one({"email": email})
-    code = gen_code()
-    if existing:
-        if existing.get("verified"):
-            raise HTTPException(409, "An account with this email already exists. Try Admin Access instead.")
-        admin_id = existing["id"]
-        await _db.admins.update_one({"email": email}, {"$set": {
-            "password_hash": _hash_password(payload.password),
-            "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-        }})
-        team_ids = existing.get("team_ids") or []
-        team_id = team_ids[0] if team_ids else None
-        if team_id:
-            await _db.teams.update_one({"id": team_id}, {"$set": {"team_name": payload.team_name.strip()}})
-    else:
-        admin_id = str(uuid.uuid4())
-        await _db.admins.insert_one({
-            "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
-            "verified": False, "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-            "reset_code": None, "reset_code_expires": None,
-            "team_ids": [], "created_at": _now_utc().isoformat(),
-        })
-        team_id = None
-
-    if not team_id:
-        team_id = str(uuid.uuid4())
-        athlete_code = await unique_team_code("athlete_code")
-        admin_code = await unique_team_code("admin_code")
-        await _db.teams.insert_one({
-            "id": team_id, "team_name": payload.team_name.strip(), "owner_admin_id": admin_id,
-            "athlete_code": athlete_code, "admin_code": admin_code, "verified": False,
-            "created_at": _now_utc().isoformat(),
-        })
-        await _db.admins.update_one({"id": admin_id}, {"$addToSet": {"team_ids": team_id}})
-
-    await send_code_email(email, code, "verify")
-    return {"message": "Verification code sent to your email."}
-
-
-@platform_router.post("/team/verify")
-async def team_verify(payload: VerifyPayload):
-    email = norm_email(payload.email)
-    admin = await _db.admins.find_one({"email": email})
-    if not admin:
-        raise HTTPException(404, "Account not found")
-    if not admin.get("verified"):
-        if not code_is_valid(admin.get("verify_code"), admin.get("verify_code_expires"), payload.code):
-            raise HTTPException(400, "That code is invalid or has expired.")
-        await _db.admins.update_one({"email": email}, {"$set": {"verified": True, "verify_code": None, "verify_code_expires": None}})
-        await _db.teams.update_many({"owner_admin_id": admin["id"]}, {"$set": {"verified": True}})
-    token = make_token(admin["id"], "admin")
-    team = await _db.teams.find_one({"owner_admin_id": admin["id"]}, {"_id": 0})
-    return {"token": token, "admin": {"id": admin["id"], "email": email}, "team": team}
+    admin_id = str(uuid.uuid4())
+    team_id = str(uuid.uuid4())
+    athlete_code = await unique_team_code("athlete_code")
+    admin_code = await unique_team_code("admin_code")
+    await _db.admins.insert_one({
+        "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
+        "reset_code": None, "reset_code_expires": None,
+        "team_ids": [team_id], "created_at": _now_utc().isoformat(),
+    })
+    await _db.teams.insert_one({
+        "id": team_id, "team_name": payload.team_name.strip(), "owner_admin_id": admin_id,
+        "athlete_code": athlete_code, "admin_code": admin_code, "created_at": _now_utc().isoformat(),
+    })
+    token = make_token(admin_id, "admin")
+    team = await _db.teams.find_one({"id": team_id}, {"_id": 0})
+    return {"token": token, "admin": {"id": admin_id, "email": email}, "team": team}
 
 
 @platform_router.post("/admin/signup")
 async def admin_signup(payload: AdminSignup):
     """For someone who needs access to an EXISTING team (e.g. a physio) rather than
     creating a new one. Creates an admin account with no team attached; they link to
-    a team afterwards via /admin/link-team using that team's admin code (item 8)."""
+    a team afterwards via /admin/link-team using that team's admin code."""
     email = norm_email(payload.email)
     if not valid_email(email):
         raise HTTPException(400, "Enter a valid email address")
     _password_ok(payload.password)
-
-    existing = await _db.admins.find_one({"email": email})
-    code = gen_code()
-    if existing:
-        if existing.get("verified"):
-            raise HTTPException(409, "An account with this email already exists. Try logging in.")
-        await _db.admins.update_one({"email": email}, {"$set": {
-            "password_hash": _hash_password(payload.password),
-            "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-        }})
-    else:
-        await _db.admins.insert_one({
-            "id": str(uuid.uuid4()), "email": email, "password_hash": _hash_password(payload.password),
-            "verified": False, "verify_code": code, "verify_code_expires": code_expiry().isoformat(),
-            "reset_code": None, "reset_code_expires": None,
-            "team_ids": [], "created_at": _now_utc().isoformat(),
-        })
-    await send_code_email(email, code, "verify")
-    return {"message": "Verification code sent to your email."}
-
-
-@platform_router.post("/admin/verify")
-async def admin_verify(payload: VerifyPayload):
-    email = norm_email(payload.email)
-    admin = await _db.admins.find_one({"email": email})
-    if not admin:
-        raise HTTPException(404, "Account not found")
-    if not admin.get("verified"):
-        if not code_is_valid(admin.get("verify_code"), admin.get("verify_code_expires"), payload.code):
-            raise HTTPException(400, "That code is invalid or has expired.")
-        await _db.admins.update_one({"email": email}, {"$set": {"verified": True, "verify_code": None, "verify_code_expires": None}})
-    token = make_token(admin["id"], "admin")
-    teams = await _db.teams.find({"id": {"$in": admin.get("team_ids") or []}}, {"_id": 0}).to_list(50)
-    return {"token": token, "admin": {"id": admin["id"], "email": email}, "needs_code": len(teams) == 0, "teams": teams}
+    if await _db.admins.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists. Try logging in.")
+    admin_id = str(uuid.uuid4())
+    await _db.admins.insert_one({
+        "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
+        "reset_code": None, "reset_code_expires": None,
+        "team_ids": [], "created_at": _now_utc().isoformat(),
+    })
+    token = make_token(admin_id, "admin")
+    return {"token": token, "admin": {"id": admin_id, "email": email}, "needs_code": True, "teams": []}
 
 
 @platform_router.post("/admin/login")
@@ -570,11 +515,6 @@ async def admin_login(payload: LoginPayload):
     admin = await _db.admins.find_one({"email": email})
     if not admin or not _verify_password(payload.password, admin["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
-    if not admin.get("verified"):
-        code = gen_code()
-        await _db.admins.update_one({"email": email}, {"$set": {"verify_code": code, "verify_code_expires": code_expiry().isoformat()}})
-        await send_code_email(email, code, "verify")
-        raise HTTPException(403, "Please verify your email first — we've sent a new code.")
     token = make_token(admin["id"], "admin")
     teams = await _db.teams.find({"id": {"$in": admin.get("team_ids") or []}}, {"_id": 0}).to_list(50)
     return {"token": token, "admin": {"id": admin["id"], "email": email}, "needs_code": len(teams) == 0, "teams": teams}
@@ -587,7 +527,7 @@ async def admin_forgot(payload: ForgotPayload):
     if admin:
         code = gen_code()
         await _db.admins.update_one({"email": email}, {"$set": {"reset_code": code, "reset_code_expires": code_expiry().isoformat()}})
-        await send_code_email(email, code, "reset")
+        await send_reset_code_email(email, code)
     return {"message": "If an account exists for that email, a reset code has been sent."}
 
 
@@ -633,7 +573,9 @@ async def team_codes(team_id: Optional[str] = None, admin: dict = Depends(get_cu
 @platform_router.get("/team/roster")
 async def team_roster(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
-    players = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+    players = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0, "claim_token": 0}).sort("name", 1).to_list(500)
+    for p in players:
+        p["joined"] = bool(p.get("claimed_at"))
     return {"team_id": team["id"], "team_name": team["team_name"], "players": players}
 
 
@@ -643,10 +585,12 @@ async def team_roster_add(payload: RosterPlayerPayload, team_id: Optional[str] =
     if not payload.name.strip():
         raise HTTPException(400, "Enter a player name")
     player = {"id": str(uuid.uuid4()), "team_id": team["id"], "name": payload.name.strip(),
-              "contact": (payload.contact or "").strip(), "claimed_by_athlete_id": None,
+              "contact": (payload.contact or "").strip(), "claim_token": None, "claimed_at": None,
               "created_at": _now_utc().isoformat()}
     await _db.team_players.insert_one(player)
     player.pop("_id", None)
+    player.pop("claim_token", None)
+    player["joined"] = False
     return player
 
 
@@ -659,37 +603,30 @@ async def team_roster_remove(player_id: str, team_id: Optional[str] = None, admi
     return {"message": "Removed"}
 
 
-# ================= Check-ins (individual & team, shared by any athlete) =================
+@platform_router.post("/team/roster/{player_id}/unclaim")
+async def team_roster_unclaim(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    """Frees up a roster name (e.g. someone lost their device, or picked the wrong
+    name) so it can be claimed again with the team code. Also immediately revokes
+    whatever token was issued for the previous claim."""
+    team = await _admins_team(admin, team_id)
+    result = await _db.team_players.update_one(
+        {"id": player_id, "team_id": team["id"]}, {"$set": {"claim_token": None, "claimed_at": None}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Player not found")
+    return {"message": "Reset — they can rejoin with the team code."}
+
+
+# ================= Check-ins: individual (Athlete) =================
 @platform_router.post("/checkin")
-async def submit_checkin_v2(payload: CheckInV2Payload, athlete: dict = Depends(get_current_athlete)):
-    team_player_id = None
-    team_id = None
-    if payload.context == "team":
-        if not payload.team_id:
-            raise HTTPException(400, "team_id is required for a team check-in")
-        player = await _db.team_players.find_one({"team_id": payload.team_id, "claimed_by_athlete_id": athlete["id"]})
-        if not player:
-            raise HTTPException(403, "You haven't joined this team yet")
-        team_player_id = player["id"]
-        team_id = payload.team_id
-
+async def submit_individual_checkin(payload: CheckInPayload, athlete: dict = Depends(get_current_athlete)):
     today = _today_str()
-    existing = await _db.checkins_v2.find_one({
-        "athlete_id": athlete["id"], "context": payload.context, "team_id": team_id, "date": today,
-    })
-    if existing:
+    if await _db.checkins_v2.find_one({"athlete_id": athlete["id"], "context": "individual", "date": today}):
         raise HTTPException(409, "You've already submitted a check-in for today.")
-
-    load = None
-    if payload.logSession and payload.rpe and payload.duration:
-        load = payload.rpe * payload.duration
-
     doc = payload.model_dump()
-    doc.update({
-        "id": str(uuid.uuid4()), "athlete_id": athlete["id"], "athlete_name": athlete["name"],
-        "team_player_id": team_player_id, "team_id": team_id, "date": today, "load": load,
-        "created_at": _now_utc().isoformat(),
-    })
+    doc.update({"id": str(uuid.uuid4()), "context": "individual", "athlete_id": athlete["id"],
+                "athlete_name": athlete["name"], "date": today, "load": _load_from_payload(payload),
+                "created_at": _now_utc().isoformat()})
     try:
         await _db.checkins_v2.insert_one(dict(doc))
     except Exception:
@@ -699,26 +636,45 @@ async def submit_checkin_v2(payload: CheckInV2Payload, athlete: dict = Depends(g
 
 
 @platform_router.get("/checkin/mine")
-async def my_checkins(context: Optional[str] = None, team_id: Optional[str] = None, limit: int = 60,
-                       athlete: dict = Depends(get_current_athlete)):
-    query = {"athlete_id": athlete["id"]}
-    if context:
-        query["context"] = context
-    if team_id:
-        query["team_id"] = team_id
-    rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(min(limit, 200))
+async def my_individual_checkins(limit: int = 60, athlete: dict = Depends(get_current_athlete)):
+    rows = await _db.checkins_v2.find(
+        {"athlete_id": athlete["id"], "context": "individual"}, {"_id": 0}
+    ).sort("date", -1).to_list(min(limit, 200))
     return {"checkins": rows}
 
 
-async def _compute_athlete_stats(athlete_id: str, team_id: str, player_name: str) -> dict:
-    """Shared by /stats/mine (athlete viewing their own numbers) and the admin-facing
-    player detail endpoint — same numbers, same formula, viewed from either side."""
+# ================= Check-ins: team athlete (code-based, no account) =================
+@platform_router.post("/checkin/team")
+async def submit_team_checkin(payload: CheckInPayload, player: dict = Depends(get_current_team_athlete)):
+    today = _today_str()
+    if await _db.checkins_v2.find_one({"team_player_id": player["id"], "context": "team", "date": today}):
+        raise HTTPException(409, "You've already submitted a check-in for today.")
+    doc = payload.model_dump()
+    doc.update({"id": str(uuid.uuid4()), "context": "team", "team_id": player["team_id"],
+                "team_player_id": player["id"], "player_name": player["name"], "date": today,
+                "load": _load_from_payload(payload), "created_at": _now_utc().isoformat()})
+    try:
+        await _db.checkins_v2.insert_one(dict(doc))
+    except Exception:
+        raise HTTPException(409, "You've already submitted a check-in for today.")
+    doc.pop("_id", None)
+    return doc
+
+
+@platform_router.get("/checkin/team/mine")
+async def my_team_checkins(limit: int = 60, player: dict = Depends(get_current_team_athlete)):
+    rows = await _db.checkins_v2.find(
+        {"team_player_id": player["id"], "context": "team"}, {"_id": 0}
+    ).sort("date", -1).to_list(min(limit, 200))
+    return {"checkins": rows}
+
+
+# ================= Stats (shared math for athlete self-view & admin views) =================
+async def _compute_stats(base_query: dict, player_name: str) -> dict:
     today = datetime.strptime(_today_str(), "%Y-%m-%d").date()
     window_start = (today - timedelta(days=41)).strftime("%Y-%m-%d")  # 6 weeks of history for the chart
-    rows = await _db.checkins_v2.find(
-        {"athlete_id": athlete_id, "context": "team", "team_id": team_id, "date": {"$gte": window_start}},
-        {"_id": 0},
-    ).to_list(200)
+    query = {**base_query, "date": {"$gte": window_start}}
+    rows = await _db.checkins_v2.find(query, {"_id": 0}).to_list(200)
     by_date = {r["date"]: r for r in rows}
 
     def day(offset_from_today: int) -> str:
@@ -776,10 +732,9 @@ RISK_LEVEL = lambda score: "red" if score >= 50 else ("amber" if score >= 25 els
 
 
 def _risk_score(stats: dict) -> int:
-    """0-100+ composite used to rank players by concern (item 6/7's ranking system).
-    Combines load-spike risk (ACWR), fatigue-accumulation risk (monotony) and today's
-    subjective signals (illness, soreness, low readiness). Not a medical diagnosis —
-    a triage aid to point medical staff at who to check on first."""
+    """0-100+ composite used to rank players by concern. Combines load-spike risk
+    (ACWR), fatigue-accumulation risk (monotony) and today's subjective signals
+    (illness, soreness, low readiness). A triage aid, not a medical diagnosis."""
     score = 0
     score += {"red": 40, "amber": 15}.get(stats.get("acwrRisk"), 0)
     score += {"red": 25, "amber": 10}.get(stats.get("monotonyRisk"), 0)
@@ -797,30 +752,62 @@ def _risk_score(stats: dict) -> int:
     return score
 
 
-@platform_router.get("/stats/mine")
-async def my_stats(team_id: str, athlete: dict = Depends(get_current_athlete)):
-    """A team athlete's own load & readiness picture (item 4): average/peak/week-total load,
+@platform_router.get("/stats/team/mine")
+async def my_team_stats(player: dict = Depends(get_current_team_athlete)):
+    """A team athlete's own load & readiness picture: average/peak/week-total load,
     monotony, strain, ACWR, readiness vs. the previous week, and a daily series to chart."""
-    player = await _db.team_players.find_one({"team_id": team_id, "claimed_by_athlete_id": athlete["id"]})
-    if not player:
-        raise HTTPException(403, "You haven't joined this team yet")
-    stats = await _compute_athlete_stats(athlete["id"], team_id, player["name"])
+    stats = await _compute_stats({"team_player_id": player["id"], "context": "team"}, player["name"])
     stats.pop("todayCheckin", None)  # internal-only field used for risk scoring
     return stats
 
 
+@platform_router.get("/team/sleep-correlation")
+async def team_sleep_correlation(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    """Sleep hours vs. sleep quality across the whole squad's check-in history,
+    for the command centre. Plain Pearson correlation -- no extra dependency,
+    just paired (hours, quality) samples where both were actually logged."""
+    team = await _admins_team(admin, team_id)
+    rows = await _db.checkins_v2.find(
+        {"team_id": team["id"], "context": "team", "sleepHours": {"$ne": None}},
+        {"_id": 0, "sleepHours": 1, "sleepQuality": 1, "player_name": 1, "date": 1},
+    ).sort("date", -1).to_list(1000)
+    points = [r for r in rows if r.get("sleepHours") is not None and r.get("sleepQuality")]
+
+    n = len(points)
+    correlation = None
+    if n >= 3:
+        xs = [p["sleepHours"] for p in points]
+        ys = [p["sleepQuality"] for p in points]
+        mean_x, mean_y = sum(xs) / n, sum(ys) / n
+        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+        var_x = sum((x - mean_x) ** 2 for x in xs)
+        var_y = sum((y - mean_y) ** 2 for y in ys)
+        if var_x > 0 and var_y > 0:
+            correlation = round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
+
+    buckets = {}
+    for p in points:
+        b = round(p["sleepHours"])
+        buckets.setdefault(b, []).append(p["sleepQuality"])
+    bucketed = sorted(
+        [{"hours": k, "avgQuality": round(sum(v) / len(v), 2), "count": len(v)} for k, v in buckets.items()],
+        key=lambda x: x["hours"],
+    )
+    return {"points": points, "correlation": correlation, "sampleSize": n, "buckets": bucketed}
+
+
 @platform_router.get("/team/dashboard")
 async def team_dashboard(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
-    """The command centre's player-card grid + the data the ranking view sorts on (items 6/7)."""
+    """The command centre's player-card grid + the data the ranking view sorts on."""
     team = await _admins_team(admin, team_id)
     players = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
 
     out = []
     for p in players:
         entry = {"id": p["id"], "name": p["name"], "contact": p.get("contact", ""),
-                  "joined": bool(p.get("claimed_by_athlete_id"))}
-        if p.get("claimed_by_athlete_id"):
-            stats = await _compute_athlete_stats(p["claimed_by_athlete_id"], team["id"], p["name"])
+                  "joined": bool(p.get("claim_token"))}
+        if p.get("claim_token"):
+            stats = await _compute_stats({"team_player_id": p["id"], "context": "team"}, p["name"])
             risk = _risk_score(stats)
             today = stats.pop("todayCheckin", None)
             entry.update(stats)
@@ -845,17 +832,118 @@ async def team_dashboard(team_id: Optional[str] = None, admin: dict = Depends(ge
 @platform_router.get("/team/player/{player_id}")
 async def team_player_detail(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
-    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0})
+    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0, "claim_token": 0})
     if not player:
         raise HTTPException(404, "Player not found")
-    if not player.get("claimed_by_athlete_id"):
+    if not player.get("claimed_at"):
         return {"player": player, "stats": None, "checkins": []}
-    stats = await _compute_athlete_stats(player["claimed_by_athlete_id"], team["id"], player["name"])
+    stats = await _compute_stats({"team_player_id": player_id, "context": "team"}, player["name"])
     risk = _risk_score(stats)
     stats["riskScore"] = risk
     stats["riskLevel"] = RISK_LEVEL(risk)
     stats.pop("todayCheckin", None)
     checkins = await _db.checkins_v2.find(
-        {"athlete_id": player["claimed_by_athlete_id"], "context": "team", "team_id": team["id"]}, {"_id": 0}
+        {"team_player_id": player_id, "context": "team"}, {"_id": 0}
     ).sort("date", -1).to_list(30)
     return {"player": player, "stats": stats, "checkins": checkins}
+
+
+# ================= Hidden Super Admin (moderation safety net) =================
+@platform_router.post("/superadmin/login")
+async def superadmin_login(payload: SuperAdminLoginPayload):
+    email = norm_email(payload.email)
+    sa = await _db.superadmins.find_one({"email": email})
+    if not sa or not _verify_password(payload.password, sa["password_hash"]):
+        raise HTTPException(401, "Incorrect email or password")
+    token = make_token(sa["id"], "superadmin", days=7)
+    return {"token": token}
+
+
+@platform_router.get("/superadmin/athletes")
+async def superadmin_list_athletes(sa: dict = Depends(get_current_superadmin)):
+    rows = await _db.athletes.find({}, _PRIVATE_FIELDS).sort("created_at", -1).to_list(2000)
+    return {"athletes": rows}
+
+
+@platform_router.delete("/superadmin/athletes/{athlete_id}")
+async def superadmin_delete_athlete(athlete_id: str, sa: dict = Depends(get_current_superadmin)):
+    await _db.checkins_v2.delete_many({"athlete_id": athlete_id, "context": "individual"})
+    result = await _db.athletes.delete_one({"id": athlete_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Not found")
+    return {"message": "Removed"}
+
+
+@platform_router.get("/superadmin/admins")
+async def superadmin_list_admins(sa: dict = Depends(get_current_superadmin)):
+    rows = await _db.admins.find({}, _PRIVATE_FIELDS).sort("created_at", -1).to_list(2000)
+    team_ids = list({tid for r in rows for tid in (r.get("team_ids") or [])})
+    names = {}
+    if team_ids:
+        async for t in _db.teams.find({"id": {"$in": team_ids}}, {"_id": 0, "id": 1, "team_name": 1}):
+            names[t["id"]] = t["team_name"]
+    for r in rows:
+        r["teamNames"] = [names.get(tid, "Unknown") for tid in (r.get("team_ids") or [])]
+    return {"admins": rows}
+
+
+@platform_router.delete("/superadmin/admins/{admin_id}")
+async def superadmin_delete_admin(admin_id: str, sa: dict = Depends(get_current_superadmin)):
+    result = await _db.admins.delete_one({"id": admin_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Not found")
+    return {"message": "Removed"}
+
+
+@platform_router.get("/superadmin/teams")
+async def superadmin_list_teams(sa: dict = Depends(get_current_superadmin)):
+    rows = await _db.teams.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    for t in rows:
+        t["rosterCount"] = await _db.team_players.count_documents({"team_id": t["id"]})
+    return {"teams": rows}
+
+
+@platform_router.get("/superadmin/teams/{team_id}/roster")
+async def superadmin_team_roster(team_id: str, sa: dict = Depends(get_current_superadmin)):
+    team = await _db.teams.find_one({"id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(404, "Team not found")
+    players = await _db.team_players.find({"team_id": team_id}, {"_id": 0, "claim_token": 0}).sort("name", 1).to_list(500)
+    for p in players:
+        p["joined"] = bool(p.get("claimed_at"))
+    return {"team": team, "players": players}
+
+
+@platform_router.post("/superadmin/team-players/{player_id}/unclaim")
+async def superadmin_unclaim(player_id: str, sa: dict = Depends(get_current_superadmin)):
+    result = await _db.team_players.update_one({"id": player_id}, {"$set": {"claim_token": None, "claimed_at": None}})
+    if result.matched_count == 0:
+        raise HTTPException(404, "Not found")
+    return {"message": "Player slot reset — they'll need to rejoin with the team code."}
+
+
+@platform_router.post("/superadmin/email-team-summary")
+async def superadmin_email_summary(payload: EmailSummaryPayload, sa: dict = Depends(get_current_superadmin)):
+    """Optional, per the request: send a team's roster/status summary to any address,
+    from the platform's configured sender. Subject to the same Resend sending-domain
+    restriction noted for every other email in this app."""
+    team = await _db.teams.find_one({"id": payload.team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(404, "Team not found")
+    players = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+    rows_html = "".join(
+        f"<tr><td style='padding:6px 10px;border-bottom:1px solid #eee'>{p['name']}</td>"
+        f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{'Joined' if p.get('claim_token') else 'Not joined'}</td></tr>"
+        for p in players
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;">
+      <h2>{team['team_name']} — squad summary</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr><th style="text-align:left;padding:6px 10px;">Player</th><th style="text-align:left;padding:6px 10px;">Status</th></tr>
+        {rows_html}
+      </table>
+      <p style="color:#999;font-size:12px;margin-top:16px;">Sent by the Load &amp; Recovery Platform admin.</p>
+    </div>"""
+    await _send_email(f"{team['team_name']} — squad summary", html, to=[norm_email(payload.to_email)])
+    return {"message": f"Summary sent to {payload.to_email}"}
