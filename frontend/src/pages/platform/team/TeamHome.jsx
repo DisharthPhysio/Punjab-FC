@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { RiskBadge } from "@/components/platform/RiskBadge";
 import { ExitConfirmButton } from "@/components/platform/ExitConfirmButton";
+import { SleepCorrelation } from "@/components/platform/SleepCorrelation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 function CodeCard({ icon: Icon, label, code, hint }) {
@@ -148,9 +149,10 @@ export default function TeamHome() {
           </div>
         ) : (
           <Tabs defaultValue="players">
-            <TabsList className="mb-5 grid w-full grid-cols-2">
+            <TabsList className="mb-5 grid w-full grid-cols-3">
               <TabsTrigger value="players" data-testid="cc-tab-players">Players</TabsTrigger>
               <TabsTrigger value="ranking" data-testid="cc-tab-ranking">Risk ranking</TabsTrigger>
+              <TabsTrigger value="sleep" data-testid="cc-tab-sleep">Sleep</TabsTrigger>
             </TabsList>
 
             <TabsContent value="players">
@@ -178,6 +180,10 @@ export default function TeamHome() {
                   </p>
                 )}
               </div>
+            </TabsContent>
+
+            <TabsContent value="sleep">
+              <SleepCorrelation />
             </TabsContent>
           </Tabs>
         )}
