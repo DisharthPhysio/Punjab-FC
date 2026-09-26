@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle } from "lucide-react";
+import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle, MessageCircle, Satellite } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -9,7 +9,15 @@ import { Button } from "@/components/ui/button";
 import { RiskBadge } from "@/components/platform/RiskBadge";
 import { ExitConfirmButton } from "@/components/platform/ExitConfirmButton";
 import { SleepCorrelation } from "@/components/platform/SleepCorrelation";
+import { ExportButtons } from "@/components/platform/ExportButtons";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+
+function waLink(contact, playerName, teamName) {
+  const digits = (contact || "").replace(/[^\d]/g, "");
+  if (digits.length < 8) return null; // not enough digits to be a usable phone number
+  const message = `Hi ${playerName}, quick reminder to complete today's check-in for ${teamName}. Thanks!`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
 
 function CodeCard({ icon: Icon, label, code, hint }) {
   const copy = () => {
@@ -107,6 +115,7 @@ export default function TeamHome() {
     return [...joined].sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0));
   }, [dash]);
   const notJoined = dash?.players.filter((p) => !p.joined) || [];
+  const needsReminder = dash?.players.filter((p) => p.joined && !p.checkedInToday) || [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -134,14 +143,45 @@ export default function TeamHome() {
           </div>
         )}
 
-        <div className="mb-6 flex flex-wrap gap-3">
+        <div className="mb-6 flex flex-wrap items-center gap-3">
           <Button variant="outline" onClick={() => navigate("/team/roster-setup")} className="gap-1.5" data-testid="manage-roster-link">
             <Users className="h-4 w-4" /> Manage roster
           </Button>
           <Button variant="outline" onClick={() => navigate("/team/link-code")} className="gap-1.5" data-testid="link-another-team">
             <ShieldCheck className="h-4 w-4" /> Access another team
           </Button>
+          <Button variant="outline" onClick={() => navigate("/team/gps")} className="gap-1.5" data-testid="gps-data-link">
+            <Satellite className="h-4 w-4" /> GPS data
+          </Button>
+          {dash && (
+            <ExportButtons pdfUrl="/team/export/pdf" excelUrl="/team/export/excel" filename={`${dash.team_name}-report`} canShare={false} />
+          )}
         </div>
+
+        {needsReminder.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <p className="mb-3 flex items-center gap-1.5 text-sm font-bold text-amber-700 dark:text-amber-400">
+              <MessageCircle className="h-4 w-4" /> {needsReminder.length} haven't checked in today
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {needsReminder.map((p) => {
+                const link = waLink(p.contact, p.name, dash.team_name);
+                return (
+                  <a
+                    key={p.id}
+                    href={link || undefined}
+                    target="_blank" rel="noreferrer"
+                    onClick={(e) => { if (!link) { e.preventDefault(); toast.error(`No phone number on file for ${p.name}`); } }}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${link ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400" : "border-border bg-secondary text-muted-foreground cursor-not-allowed"}`}
+                    data-testid={`whatsapp-remind-${p.name}`}
+                  >
+                    <MessageCircle className="h-3 w-3" /> {p.name}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {!dash ? (
           <div className="grid place-items-center py-10">

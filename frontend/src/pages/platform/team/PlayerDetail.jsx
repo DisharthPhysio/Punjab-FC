@@ -7,6 +7,7 @@ import { AuthShell } from "@/components/platform/AuthShell";
 import { RiskBadge } from "@/components/platform/RiskBadge";
 import { StatsDisplay } from "@/components/platform/StatsView";
 import { CheckInHistory } from "@/components/platform/CheckInHistory";
+import { ExportButtons } from "@/components/platform/ExportButtons";
 
 export default function PlayerDetail() {
   const { playerId } = useParams();
@@ -70,7 +71,12 @@ export default function PlayerDetail() {
             {stats && <StatsDisplay stats={stats} />}
 
             <div>
-              <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Recent check-ins</h3>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Recent check-ins</h3>
+                {checkins?.length > 0 && (
+                  <ExportButtons pdfUrl={`/team/player/${playerId}/export/pdf`} filename={`${player.name}-checkins`} canShare={false} />
+                )}
+              </div>
               <CheckInHistory checkins={checkins} emptyLabel="No check-ins logged yet." />
             </div>
           </>
