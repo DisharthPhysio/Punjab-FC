@@ -4,17 +4,18 @@ import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { PlatformAuthProvider, usePlatformAuth } from "@/context/PlatformAuthContext";
 
-// legacy (kept working at /legacy/* during the transition)
+// legacy (kept working at /legacy/* during the Phase 1->4 transition)
 import CheckIn from "@/pages/CheckIn";
 import CoachLogin from "@/pages/CoachLogin";
 import CoachDashboard from "@/pages/CoachDashboard";
 
 // new platform
 import Landing from "@/pages/platform/Landing";
+import VerifyCode from "@/pages/platform/VerifyCode";
 import ForgotPassword from "@/pages/platform/ForgotPassword";
 import ResetPassword from "@/pages/platform/ResetPassword";
-import AthleteEntry from "@/pages/platform/athlete/AthleteEntry";
 import AthleteAuth from "@/pages/platform/athlete/AthleteAuth";
+import ModeChoice from "@/pages/platform/athlete/ModeChoice";
 import IndividualCheckIn from "@/pages/platform/athlete/IndividualCheckIn";
 import JoinTeam from "@/pages/platform/athlete/JoinTeam";
 import TeamHub from "@/pages/platform/athlete/TeamHub";
@@ -25,9 +26,6 @@ import TeamHome from "@/pages/platform/team/TeamHome";
 import AdminAuth from "@/pages/platform/team/AdminAuth";
 import LinkTeamCode from "@/pages/platform/team/LinkTeamCode";
 import PlayerDetail from "@/pages/platform/team/PlayerDetail";
-import GpsData from "@/pages/platform/team/GpsData";
-import SuperAdminLogin from "@/pages/platform/superadmin/SuperAdminLogin";
-import SuperAdminPanel from "@/pages/platform/superadmin/SuperAdminPanel";
 
 function Spinner() {
   return (
@@ -47,14 +45,7 @@ function LegacyProtectedRoute({ children }) {
 function AthleteRoute({ children }) {
   const { role, user, loading } = usePlatformAuth();
   if (loading || user === null) return <Spinner />;
-  if (!user || role !== "athlete") return <Navigate to="/athlete/individual" replace />;
-  return children;
-}
-
-function TeamAthleteRoute({ children }) {
-  const { role, user, loading } = usePlatformAuth();
-  if (loading || user === null) return <Spinner />;
-  if (!user || role !== "team_athlete") return <Navigate to="/athlete/join-team" replace />;
+  if (!user || role !== "athlete") return <Navigate to="/athlete/auth" replace />;
   return children;
 }
 
@@ -75,14 +66,15 @@ function App() {
             <Routes>
               {/* ---- new platform (root) ---- */}
               <Route path="/" element={<Landing />} />
+              <Route path="/verify" element={<VerifyCode />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
 
-              <Route path="/athlete" element={<AthleteEntry />} />
-              <Route path="/athlete/individual" element={<AthleteAuth />} />
+              <Route path="/athlete/auth" element={<AthleteAuth />} />
+              <Route path="/athlete/mode" element={<AthleteRoute><ModeChoice /></AthleteRoute>} />
               <Route path="/athlete/checkin" element={<AthleteRoute><IndividualCheckIn /></AthleteRoute>} />
-              <Route path="/athlete/join-team" element={<JoinTeam />} />
-              <Route path="/athlete/team" element={<TeamAthleteRoute><TeamHub /></TeamAthleteRoute>} />
+              <Route path="/athlete/join-team" element={<AthleteRoute><JoinTeam /></AthleteRoute>} />
+              <Route path="/athlete/team/:teamId" element={<AthleteRoute><TeamHub /></AthleteRoute>} />
 
               <Route path="/team" element={<TeamLanding />} />
               <Route path="/team/register" element={<TeamRegister />} />
@@ -91,11 +83,6 @@ function App() {
               <Route path="/team/roster-setup" element={<AdminRoute requireTeam><RosterSetup /></AdminRoute>} />
               <Route path="/team/home" element={<AdminRoute requireTeam><TeamHome /></AdminRoute>} />
               <Route path="/team/player/:playerId" element={<AdminRoute requireTeam><PlayerDetail /></AdminRoute>} />
-              <Route path="/team/gps" element={<AdminRoute requireTeam><GpsData /></AdminRoute>} />
-
-              {/* ---- hidden site-admin panel: reached only via the long-press on Landing ---- */}
-              <Route path="/superadmin/login" element={<SuperAdminLogin />} />
-              <Route path="/superadmin/panel" element={<SuperAdminPanel />} />
 
               {/* ---- legacy single-team flow, kept alive during the transition ---- */}
               <Route path="/legacy" element={<CheckIn />} />
