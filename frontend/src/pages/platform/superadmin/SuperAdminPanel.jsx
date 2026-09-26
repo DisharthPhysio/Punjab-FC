@@ -63,6 +63,16 @@ function TeamRosterRow({ team, onChanged }) {
     }
   };
 
+  const deleteTeam = async () => {
+    try {
+      const res = await apiSuperAdmin.delete(`/superadmin/teams/${team.id}`);
+      toast.success(res.data.message);
+      onChanged?.();
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    }
+  };
+
   return (
     <div className="rounded-xl border border-border bg-card">
       <button onClick={toggle} className="flex w-full items-center justify-between px-4 py-3 text-left" data-testid={`sa-team-${team.team_name}`}>
@@ -89,6 +99,27 @@ function TeamRosterRow({ team, onChanged }) {
             </div>
           ))}
           {players?.length === 0 && <p className="py-2 text-center text-xs text-muted-foreground">No players yet.</p>}
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/30 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10" data-testid={`sa-delete-team-${team.team_name}`}>
+                <Trash2 className="h-3.5 w-3.5" /> Remove this team
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove {team.team_name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently deletes the team, its entire roster, every check-in, and any GPS data —
+                  for everyone. It can't be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={deleteTeam}>Delete everything</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
     </div>
