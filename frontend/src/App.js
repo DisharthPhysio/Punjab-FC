@@ -25,6 +25,7 @@ import TeamHome from "@/pages/platform/team/TeamHome";
 import AdminAuth from "@/pages/platform/team/AdminAuth";
 import LinkTeamCode from "@/pages/platform/team/LinkTeamCode";
 import PlayerDetail from "@/pages/platform/team/PlayerDetail";
+import GpsData from "@/pages/platform/team/GpsData";
 import SuperAdminLogin from "@/pages/platform/superadmin/SuperAdminLogin";
 import SuperAdminPanel from "@/pages/platform/superadmin/SuperAdminPanel";
 
@@ -90,6 +91,7 @@ function App() {
               <Route path="/team/roster-setup" element={<AdminRoute requireTeam><RosterSetup /></AdminRoute>} />
               <Route path="/team/home" element={<AdminRoute requireTeam><TeamHome /></AdminRoute>} />
               <Route path="/team/player/:playerId" element={<AdminRoute requireTeam><PlayerDetail /></AdminRoute>} />
+              <Route path="/team/gps" element={<AdminRoute requireTeam><GpsData /></AdminRoute>} />
 
               {/* ---- hidden site-admin panel: reached only via the long-press on Landing ---- */}
               <Route path="/superadmin/login" element={<SuperAdminLogin />} />
