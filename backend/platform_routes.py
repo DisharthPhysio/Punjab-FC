@@ -34,8 +34,10 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+
+import export_utils
 
 platform_router = APIRouter(prefix="/api/v2")
 
@@ -78,6 +80,7 @@ async def ensure_indexes():
     await _db.checkins_v2.create_index(
         [("athlete_id", 1), ("team_player_id", 1), ("context", 1), ("date", 1)], unique=True
     )
+    await _db.gps_sessions.create_index([("team_id", 1), ("team_player_id", 1), ("date", 1)])
     # Seed the hidden super admin account (env vars override the defaults given at build time).
     email = os.environ.get("SUPER_ADMIN_EMAIL", SUPER_ADMIN_EMAIL_DEFAULT).strip().lower()
     password = os.environ.get("SUPER_ADMIN_PASSWORD", SUPER_ADMIN_PASSWORD_DEFAULT)
@@ -339,11 +342,20 @@ class CheckInPayload(BaseModel):
     sorenessSide: Optional[str] = ""
     sorenessSeverity: Optional[int] = 0
     sorenessNotes: Optional[str] = ""
-    logSession: bool = False
-    sessionType: Optional[str] = ""
-    rpe: Optional[int] = 0
-    duration: Optional[int] = 0
+    # Training log is mandatory (not an optional toggle): every check-in logs a session.
+    sessionType: str
+    rpe: int
+    duration: int
     notes: Optional[str] = ""
+
+
+def _validate_checkin(payload: "CheckInPayload"):
+    if not payload.sessionType.strip():
+        raise HTTPException(400, "Select today's session type")
+    if not (1 <= payload.rpe <= 10):
+        raise HTTPException(400, "Select today's session RPE (1-10)")
+    if payload.duration < 1:
+        raise HTTPException(400, "Enter today's session duration in minutes")
 
 
 class SuperAdminLoginPayload(BaseModel):
@@ -356,10 +368,18 @@ class EmailSummaryPayload(BaseModel):
     to_email: str
 
 
-def _load_from_payload(payload: CheckInPayload) -> Optional[int]:
-    if payload.logSession and payload.rpe and payload.duration:
-        return payload.rpe * payload.duration
-    return None
+class GpsSessionPayload(BaseModel):
+    player_id: str
+    date: str  # YYYY-MM-DD, the training/match day this GPS data is for
+    distance_m: Optional[float] = None
+    hsr_distance_m: Optional[float] = None  # high-speed running distance
+    sprints: Optional[int] = None
+    max_speed_kmh: Optional[float] = None
+    notes: Optional[str] = ""
+
+
+def _load_from_payload(payload: CheckInPayload) -> int:
+    return payload.rpe * payload.duration
 
 
 # ================= Athlete auth (individual only — no verification step) =================
@@ -617,9 +637,93 @@ async def team_roster_unclaim(player_id: str, team_id: Optional[str] = None, adm
     return {"message": "Reset — they can rejoin with the team code."}
 
 
+# ================= GPS data (optional feature) =================
+# Research basis: session-RPE (our existing rpe x duration "load") is the standard
+# internal-load measure in the sports-science literature, and correlates well with
+# GPS total distance in particular; high-speed-running distance and accelerations
+# track a meaningfully different dimension and often correlate weakly with RPE --
+# that gap is informative (e.g. high output but low perceived effort, or the
+# reverse), not a data-quality problem. So rather than compress GPS data into a
+# single opaque "external load" number, this keeps distance/HSR/sprints/max speed
+# as separate fields and lets the coach see how they move against internal load.
+@platform_router.post("/team/gps")
+async def add_gps_session(payload: GpsSessionPayload, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    player = await _db.team_players.find_one({"id": payload.player_id, "team_id": team["id"]})
+    if not player:
+        raise HTTPException(404, "Player not found on this team's roster")
+    doc = payload.model_dump()
+    doc.update({"id": str(uuid.uuid4()), "team_id": team["id"], "team_player_id": payload.player_id,
+                "player_name": player["name"], "created_at": _now_utc().isoformat()})
+    await _db.gps_sessions.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@platform_router.get("/team/gps")
+async def list_gps_sessions(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    rows = await _db.gps_sessions.find(
+        {"team_id": team["id"], "team_player_id": player_id}, {"_id": 0}
+    ).sort("date", -1).to_list(200)
+    return {"sessions": rows}
+
+
+@platform_router.delete("/team/gps/{session_id}")
+async def delete_gps_session(session_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    result = await _db.gps_sessions.delete_one({"id": session_id, "team_id": team["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Session not found")
+    return {"message": "Deleted"}
+
+
+@platform_router.get("/team/gps/analysis")
+async def gps_analysis(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]})
+    if not player:
+        raise HTTPException(404, "Player not found")
+    gps_rows = await _db.gps_sessions.find({"team_id": team["id"], "team_player_id": player_id}, {"_id": 0}).to_list(200)
+    checkin_rows = await _db.checkins_v2.find(
+        {"team_player_id": player_id, "context": "team", "load": {"$ne": None}}, {"_id": 0, "date": 1, "load": 1}
+    ).to_list(500)
+    internal_by_date = {c["date"]: c["load"] for c in checkin_rows}
+
+    paired = []
+    for g in sorted(gps_rows, key=lambda x: x["date"]):
+        internal = internal_by_date.get(g["date"])
+        paired.append({**g, "internal_load": internal})
+
+    matched = [p for p in paired if p.get("distance_m") is not None and p.get("internal_load") is not None]
+    correlation = None
+    if len(matched) >= 3:
+        xs = [p["distance_m"] for p in matched]
+        ys = [p["internal_load"] for p in matched]
+        n = len(matched)
+        mean_x, mean_y = sum(xs) / n, sum(ys) / n
+        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+        var_x = sum((x - mean_x) ** 2 for x in xs)
+        var_y = sum((y - mean_y) ** 2 for y in ys)
+        if var_x > 0 and var_y > 0:
+            correlation = round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
+
+    return {"player_name": player["name"], "sessions": paired, "correlation": correlation, "matchedSamples": len(matched)}
+
+
+@platform_router.get("/team/gps/export/pdf")
+async def export_gps_pdf(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    analysis = await gps_analysis(player_id=player_id, team_id=team["id"], admin=admin)
+    pdf = export_utils.generate_gps_pdf(team["team_name"], analysis["player_name"], analysis["sessions"], analysis["correlation"])
+    return Response(content=pdf, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{analysis["player_name"]}-gps.pdf"'})
+
+
 # ================= Check-ins: individual (Athlete) =================
 @platform_router.post("/checkin")
 async def submit_individual_checkin(payload: CheckInPayload, athlete: dict = Depends(get_current_athlete)):
+    _validate_checkin(payload)
     today = _today_str()
     if await _db.checkins_v2.find_one({"athlete_id": athlete["id"], "context": "individual", "date": today}):
         raise HTTPException(409, "You've already submitted a check-in for today.")
@@ -643,9 +747,42 @@ async def my_individual_checkins(limit: int = 60, athlete: dict = Depends(get_cu
     return {"checkins": rows}
 
 
+@platform_router.patch("/checkin/{checkin_id}")
+async def edit_individual_checkin(checkin_id: str, payload: CheckInPayload, athlete: dict = Depends(get_current_athlete)):
+    _validate_checkin(payload)
+    existing = await _db.checkins_v2.find_one({"id": checkin_id, "athlete_id": athlete["id"], "context": "individual"})
+    if not existing:
+        raise HTTPException(404, "Check-in not found")
+    updates = payload.model_dump()
+    updates["load"] = _load_from_payload(payload)
+    await _db.checkins_v2.update_one({"id": checkin_id}, {"$set": updates})
+    existing.update(updates)
+    existing.pop("_id", None)
+    return existing
+
+
+@platform_router.delete("/checkin/{checkin_id}")
+async def delete_individual_checkin(checkin_id: str, athlete: dict = Depends(get_current_athlete)):
+    result = await _db.checkins_v2.delete_one({"id": checkin_id, "athlete_id": athlete["id"], "context": "individual"})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Check-in not found")
+    return {"message": "Deleted"}
+
+
+@platform_router.get("/checkin/export/pdf")
+async def export_individual_pdf(athlete: dict = Depends(get_current_athlete)):
+    rows = await _db.checkins_v2.find(
+        {"athlete_id": athlete["id"], "context": "individual"}, {"_id": 0}
+    ).sort("date", -1).to_list(500)
+    pdf = export_utils.generate_history_pdf(athlete["name"], "Individual check-in history", rows)
+    return Response(content=pdf, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{athlete["name"]}-checkins.pdf"'})
+
+
 # ================= Check-ins: team athlete (code-based, no account) =================
 @platform_router.post("/checkin/team")
 async def submit_team_checkin(payload: CheckInPayload, player: dict = Depends(get_current_team_athlete)):
+    _validate_checkin(payload)
     today = _today_str()
     if await _db.checkins_v2.find_one({"team_player_id": player["id"], "context": "team", "date": today}):
         raise HTTPException(409, "You've already submitted a check-in for today.")
@@ -667,6 +804,38 @@ async def my_team_checkins(limit: int = 60, player: dict = Depends(get_current_t
         {"team_player_id": player["id"], "context": "team"}, {"_id": 0}
     ).sort("date", -1).to_list(min(limit, 200))
     return {"checkins": rows}
+
+
+@platform_router.patch("/checkin/team/{checkin_id}")
+async def edit_team_checkin(checkin_id: str, payload: CheckInPayload, player: dict = Depends(get_current_team_athlete)):
+    _validate_checkin(payload)
+    existing = await _db.checkins_v2.find_one({"id": checkin_id, "team_player_id": player["id"], "context": "team"})
+    if not existing:
+        raise HTTPException(404, "Check-in not found")
+    updates = payload.model_dump()
+    updates["load"] = _load_from_payload(payload)
+    await _db.checkins_v2.update_one({"id": checkin_id}, {"$set": updates})
+    existing.update(updates)
+    existing.pop("_id", None)
+    return existing
+
+
+@platform_router.delete("/checkin/team/{checkin_id}")
+async def delete_team_checkin(checkin_id: str, player: dict = Depends(get_current_team_athlete)):
+    result = await _db.checkins_v2.delete_one({"id": checkin_id, "team_player_id": player["id"], "context": "team"})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Check-in not found")
+    return {"message": "Deleted"}
+
+
+@platform_router.get("/checkin/team/export/pdf")
+async def export_team_athlete_pdf(player: dict = Depends(get_current_team_athlete)):
+    rows = await _db.checkins_v2.find(
+        {"team_player_id": player["id"], "context": "team"}, {"_id": 0}
+    ).sort("date", -1).to_list(500)
+    pdf = export_utils.generate_history_pdf(player["name"], "Team check-in history", rows)
+    return Response(content=pdf, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
 
 
 # ================= Stats (shared math for athlete self-view & admin views) =================
@@ -829,6 +998,24 @@ async def team_dashboard(team_id: Optional[str] = None, admin: dict = Depends(ge
     return {"team_name": team["team_name"], "summary": {"total": len(out), "checkedIn": checked_in, "flagged": flagged}, "players": out}
 
 
+@platform_router.get("/team/export/pdf")
+async def export_team_pdf(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    dash = await team_dashboard(team_id=team["id"], admin=admin)
+    pdf = export_utils.generate_team_pdf(dash["team_name"], dash["summary"], dash["players"])
+    return Response(content=pdf, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{dash["team_name"]}-report.pdf"'})
+
+
+@platform_router.get("/team/export/excel")
+async def export_team_excel(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    dash = await team_dashboard(team_id=team["id"], admin=admin)
+    xlsx = export_utils.generate_team_excel(dash["team_name"], dash["players"])
+    return Response(content=xlsx, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     headers={"Content-Disposition": f'attachment; filename="{dash["team_name"]}-report.xlsx"'})
+
+
 @platform_router.get("/team/player/{player_id}")
 async def team_player_detail(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
@@ -846,6 +1033,20 @@ async def team_player_detail(player_id: str, team_id: Optional[str] = None, admi
         {"team_player_id": player_id, "context": "team"}, {"_id": 0}
     ).sort("date", -1).to_list(30)
     return {"player": player, "stats": stats, "checkins": checkins}
+
+
+@platform_router.get("/team/player/{player_id}/export/pdf")
+async def export_player_pdf(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0})
+    if not player:
+        raise HTTPException(404, "Player not found")
+    checkins = await _db.checkins_v2.find(
+        {"team_player_id": player_id, "context": "team"}, {"_id": 0}
+    ).sort("date", -1).to_list(500)
+    pdf = export_utils.generate_history_pdf(player["name"], f"{team['team_name']} — check-in history", checkins)
+    return Response(content=pdf, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
 
 
 # ================= Hidden Super Admin (moderation safety net) =================
@@ -912,6 +1113,21 @@ async def superadmin_team_roster(team_id: str, sa: dict = Depends(get_current_su
     for p in players:
         p["joined"] = bool(p.get("claimed_at"))
     return {"team": team, "players": players}
+
+
+@platform_router.delete("/superadmin/teams/{team_id}")
+async def superadmin_delete_team(team_id: str, sa: dict = Depends(get_current_superadmin)):
+    """Cascade-deletes the team: roster, all its check-ins and GPS sessions, and
+    unlinks it from every admin who had access. Cannot be undone."""
+    team = await _db.teams.find_one({"id": team_id})
+    if not team:
+        raise HTTPException(404, "Team not found")
+    await _db.team_players.delete_many({"team_id": team_id})
+    await _db.checkins_v2.delete_many({"team_id": team_id, "context": "team"})
+    await _db.gps_sessions.delete_many({"team_id": team_id})
+    await _db.admins.update_many({"team_ids": team_id}, {"$pull": {"team_ids": team_id}})
+    await _db.teams.delete_one({"id": team_id})
+    return {"message": f"{team['team_name']} and all its data were removed."}
 
 
 @platform_router.post("/superadmin/team-players/{player_id}/unclaim")
