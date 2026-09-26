@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Activity, CheckCircle2, Moon, Droplets, Flame, Thermometer, Dumbbell, ShieldAlert, Lock, TrendingUp } from "lucide-react";
+import { Activity, CheckCircle2, Moon, Droplets, Flame, Thermometer, Dumbbell, ShieldAlert, Lock } from "lucide-react";
 import api, { formatApiError } from "@/lib/api";
 import { WellnessRating } from "@/components/WellnessRating";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -152,16 +152,11 @@ export default function CheckIn() {
               <Activity className="h-6 w-6 shrink-0" />
               <span className="text-sm font-bold uppercase leading-tight tracking-widest">Load and Recovery Monitoring</span>
             </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-2">
               <ThemeToggle />
-              <Link to="/my-stats" data-testid="my-stats-link">
-                <Button variant="outline" size="sm" className="gap-1.5 px-2 sm:px-3">
-                  <TrendingUp className="h-3.5 w-3.5" /> <span className="hidden sm:inline">My Stats</span>
-                </Button>
-              </Link>
               <Link to="/coach" data-testid="coach-login-link">
-                <Button variant="outline" size="sm" className="gap-1.5 px-2 sm:px-3">
-                  <Lock className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Medical Team</span>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Lock className="h-3.5 w-3.5" /> Medical Team
                 </Button>
               </Link>
             </div>
