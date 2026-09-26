@@ -20,12 +20,6 @@ import bcrypt
 import resend
 import openpyxl
 from openpyxl.styles import Font, PatternFill
-from reportlab.lib import colors as rl_colors
-from reportlab.lib.pagesizes import landscape, A4
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -198,21 +192,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class PasswordChangePayload(BaseModel):
-    currentPassword: str
-    newPassword: str
-
-
-class AlertPrefsPayload(BaseModel):
-    receiveAlerts: bool
-
-
-class TeamMemberCreate(BaseModel):
-    email: str
-    password: str
-    name: Optional[str] = "Medical Team"
-
-
 class PhonePayload(BaseModel):
     phone: str = ""
 
@@ -248,14 +227,6 @@ class CheckInPayload(BaseModel):
 
 
 # ---------- Email ----------
-async def alert_recipients() -> List[str]:
-    """Everyone who should get alert/report emails: every Medical Team account that hasn't opted out,
-    falling back to COACH_EMAIL so a fresh deploy never silently ends up with zero recipients."""
-    docs = await db.users.find({"receiveAlerts": {"$ne": False}}, {"_id": 0, "email": 1}).to_list(1000)
-    emails = [d["email"] for d in docs if d.get("email")]
-    return emails or ([COACH_EMAIL] if COACH_EMAIL else [])
-
-
 def _send_email_sync(subject: str, html: str, attachments=None, to=None):
     recipients = to if to else ([COACH_EMAIL] if COACH_EMAIL else [])
     if not resend.api_key or not recipients:
@@ -268,9 +239,11 @@ def _send_email_sync(subject: str, html: str, attachments=None, to=None):
 
 
 async def send_email(subject: str, html: str, attachments=None, to=None):
+    """to: optional list of recipient addresses. Defaults to COACH_EMAIL (legacy behavior).
+    NOTE: Resend's default sandbox sender (onboarding@resend.dev) can usually only deliver
+    to the Resend account's own verified address. To actually reach athlete/team emails,
+    verify a custom sending domain in Resend and set SENDER_EMAIL to an address on it."""
     try:
-        if to is None:
-            to = await alert_recipients()
         return await asyncio.to_thread(_send_email_sync, subject, html, attachments, to)
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
@@ -426,79 +399,11 @@ async def me(user: dict = Depends(get_current_user)):
     return user
 
 
-@api_router.put("/auth/password")
-async def change_password(payload: PasswordChangePayload, user: dict = Depends(get_current_user)):
-    doc = await db.users.find_one({"id": user["id"]})
-    if not doc or not verify_password(payload.currentPassword, doc["password_hash"]):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if len(payload.newPassword) < 8:
-        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
-    await db.users.update_one({"id": user["id"]}, {"$set": {
-        "password_hash": hash_password(payload.newPassword), "passwordManaged": True,
-    }})
-    return {"status": "ok"}
-
-
-@api_router.put("/auth/alerts")
-async def set_alert_prefs(payload: AlertPrefsPayload, user: dict = Depends(get_current_user)):
-    await db.users.update_one({"id": user["id"]}, {"$set": {"receiveAlerts": payload.receiveAlerts}})
-    return {"status": "ok", "receiveAlerts": payload.receiveAlerts}
-
-
-# ---------- Team (Medical Team accounts: multiple logins, each with their own password + alert preference) ----------
-@api_router.get("/team")
-async def list_team(user: dict = Depends(get_current_user)):
-    docs = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("email", 1).to_list(200)
-    for d in docs:
-        d.setdefault("receiveAlerts", True)
-    return docs
-
-
-@api_router.post("/team")
-async def add_team_member(payload: TeamMemberCreate, user: dict = Depends(get_current_user)):
-    email = payload.email.strip().lower()
-    if not email or "@" not in email or " " in email:
-        raise HTTPException(status_code=400, detail="Enter a valid email address")
-    if len(payload.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="That email is already on the Medical Team")
-    doc = {
-        "id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(payload.password),
-        "name": (payload.name or "").strip() or "Medical Team", "role": "coach", "receiveAlerts": True,
-        "created_at": now_utc().isoformat(),
-    }
-    await db.users.insert_one(doc)
-    return {"id": doc["id"], "email": doc["email"], "name": doc["name"], "receiveAlerts": True}
-
-
-@api_router.delete("/team/{member_id}")
-async def remove_team_member(member_id: str, user: dict = Depends(get_current_user)):
-    total = await db.users.count_documents({})
-    if total <= 1:
-        raise HTTPException(status_code=400, detail="At least one Medical Team account must remain")
-    res = await db.users.delete_one({"id": member_id})
-    if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Team member not found")
-    return {"status": "ok"}
-
-
 # ---------- Roster Routes ----------
 @api_router.get("/roster")
 async def get_roster():
     roster = await db.roster.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
     return roster
-
-
-@api_router.get("/roster/status")
-async def roster_status():
-    """Public, read-only: which roster athletes have ALREADY checked in today (name + yes/no only,
-    nothing about their answers). Used by the check-in form to hide names that have already submitted,
-    so a player can't accidentally fill the form twice for the same day."""
-    d = today_str()
-    roster = await db.roster.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(1000)
-    checked_today = set(await db.checkins.distinct("name", {"date": d}))
-    return [{"id": a["id"], "name": a["name"], "checkedIn": a["name"] in checked_today} for a in roster]
 
 
 @api_router.post("/roster")
@@ -588,9 +493,6 @@ async def import_phones(payload: PhoneImportPayload, user: dict = Depends(get_cu
 async def submit_checkin(data: CheckInPayload):
     ts = now_utc().isoformat()
     d = today_str()
-    if await db.checkins.find_one({"name": data.name, "date": d}, {"_id": 1}):
-        raise HTTPException(status_code=409, detail=f"{data.name} has already checked in today. "
-                             f"If this needs correcting, ask your medical team to edit or delete the entry.")
     checkin_doc = {
         "id": str(uuid.uuid4()), "timestamp": ts, "date": d, "name": data.name,
         "sleepQuality": data.sleepQuality, "sleepNotes": data.sleepNotes,
@@ -781,10 +683,10 @@ async def dashboard(date: Optional[str] = None, user: dict = Depends(get_current
     return data
 
 
-async def compute_athlete_trends(name: str, days: int = 7, end: Optional[str] = None) -> dict:
+@api_router.get("/trends")
+async def trends(name: str, days: int = 7, end: Optional[str] = None, user: dict = Depends(get_current_user)):
     """Per-athlete history for the last `days` days (7-90) ending on `end` (default today):
-    daily load / readiness / soreness / illness, plus weekly load, monotony, strain and change vs the previous week.
-    Shared by the coach's /trends route and the athlete-facing /my-stats route."""
+    daily load / readiness / soreness / illness, plus weekly load, monotony, strain and change vs the previous week."""
     days = max(7, min(int(days), 90))
     end_str = parse_day(end)
     end_day = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else datetime.now(TZ).date()
@@ -829,50 +731,6 @@ async def compute_athlete_trends(name: str, days: int = 7, end: Optional[str] = 
         st["changePct"] = change_pct(st["load"], st["prevLoad"])
         weeks.append(st)
     return {"name": name, "range": days, "end": date_strs[-1], "days": all_days[-days:], "weeks": weeks}
-
-
-@api_router.get("/trends")
-async def trends(name: str, days: int = 7, end: Optional[str] = None, user: dict = Depends(get_current_user)):
-    return await compute_athlete_trends(name, days, end)
-
-
-# ---------- Team access code (athletes' own "My Stats" page) ----------
-class TeamCodePayload(BaseModel):
-    code: str
-
-
-async def get_team_code() -> str:
-    doc = await db.settings.find_one({"key": "team_access_code"}, {"_id": 0})
-    return (doc or {}).get("code", "")
-
-
-@api_router.get("/team-access-code")
-async def team_access_code(user: dict = Depends(get_current_user)):
-    return {"code": await get_team_code()}
-
-
-@api_router.put("/team-access-code")
-async def set_team_access_code(payload: TeamCodePayload, user: dict = Depends(get_current_user)):
-    code = payload.code.strip()
-    if code and not (4 <= len(code) <= 20):
-        raise HTTPException(status_code=400, detail="Code must be 4-20 characters (or blank to turn My Stats off)")
-    await db.settings.update_one({"key": "team_access_code"}, {"$set": {"code": code}}, upsert=True)
-    return {"code": code}
-
-
-@api_router.get("/my-stats")
-async def my_stats(name: str, code: str, days: int = 7, end: Optional[str] = None):
-    """Public but code-gated: lets an athlete see their OWN history (load, readiness, illness, soreness) with
-    a single team-wide access code set by the coach - no per-athlete login or email. Never lists other athletes'
-    data; the caller must already know their own name (from the public roster) and the shared code."""
-    team_code = await get_team_code()
-    if not team_code:
-        raise HTTPException(status_code=403, detail="My Stats isn't turned on yet. Ask your medical team to set an access code.")
-    if code.strip() != team_code:
-        raise HTTPException(status_code=403, detail="That access code isn't right. Ask your medical team for the current one.")
-    if not await db.roster.find_one({"name": name}, {"_id": 1}):
-        raise HTTPException(status_code=404, detail="That name isn't on the roster.")
-    return await compute_athlete_trends(name, days, end)
 
 
 HEATMAP_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Gluteus", "Groin", "Upper Back / Neck"]
@@ -1024,101 +882,6 @@ async def delete_checkin(checkin_id: str, user: dict = Depends(get_current_user)
     return {"status": "ok", "deleted": checkin_id, "checkin": doc, "session": session}
 
 
-# ---------- PDF ----------
-RL_FILLS = {"green": rl_colors.HexColor("#D4EDDA"), "amber": rl_colors.HexColor("#FFF3CD"),
-            "red": rl_colors.HexColor("#F8D7DA"), "grey": rl_colors.HexColor("#F1F1F1")}
-
-
-async def build_pdf_bytes(day: Optional[str] = None) -> bytes:
-    """A one-page-per-~25-athletes PDF snapshot of the squad status for `day` (default today):
-    the same numbers and traffic-light colors as the Excel Dashboard sheet, laid out to print or share."""
-    dash = await compute_dashboard(day)
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm,
-                             topMargin=12 * mm, bottomMargin=12 * mm, title="Load and Recovery Monitoring Report")
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("Title2", parent=styles["Heading1"], fontSize=16, spaceAfter=2, textColor=rl_colors.HexColor("#0B0F17"))
-    sub_style = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=10, textColor=rl_colors.HexColor("#555555"), alignment=TA_LEFT)
-
-    story = [
-        Paragraph("Load and Recovery Monitoring Report", title_style),
-        Paragraph(dash["date"], sub_style),
-        Spacer(1, 4 * mm),
-        Paragraph(
-            f"{dash['summary']['checkedIn']} of {dash['summary']['total']} athletes checked in &nbsp;&nbsp;·&nbsp;&nbsp; "
-            f"{dash['summary']['followUps']} need follow-up &nbsp;&nbsp;·&nbsp;&nbsp; "
-            f"{dash['summary']['highLoad']} high training load &nbsp;&nbsp;·&nbsp;&nbsp; "
-            f"{dash['summary']['loadSpikes']} ACWR load spikes", sub_style,
-        ),
-        Spacer(1, 5 * mm),
-    ]
-
-    headers = ["Athlete", "Sleep", "Hyd.", "Mood", "Illness", "Soreness", "Session\nLoad", "7-Day\nLoad", "Monotony", "Strain"]
-    header_row = [Paragraph(f"<b>{h}</b>", ParagraphStyle("H", parent=styles["Normal"], fontSize=8, textColor=rl_colors.white)) for h in headers]
-    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=8, leading=10)
-    table_rows = [header_row]
-    row_fills = []  # (row_index_in_table, {col: color}) - header excluded, so index 0 = first athlete row
-    for a in dash["athletes"]:
-        fills = {}
-        if not a["checkedIn"]:
-            table_rows.append([
-                Paragraph(a["name"], cell_style), "—", "—", "—", Paragraph("Not checked in", cell_style), "—",
-                str(a.get("load") or "—"), str(a.get("weekLoad", 0)),
-                str(a.get("monotony")) if a.get("monotony") is not None else "—",
-                str(a.get("strain")) if a.get("strain") is not None else "—",
-            ])
-            for col in range(10):
-                fills[col] = RL_FILLS["grey"]
-            row_fills.append(fills)
-            continue
-        ill_text = ("Yes — " + ", ".join(a.get("symptoms", []))) if a.get("feelingIll") else "No"
-        soreness_text = ", ".join(a.get("sorenessAreas", [])) if a.get("sorenessAreas") else "None"
-        if a.get("sorenessAreas") and a.get("sorenessSide"):
-            soreness_text += f" ({a['sorenessSide']})"
-        table_rows.append([
-            Paragraph(a["name"], cell_style), str(a["sleep"]), str(a["hydration"]), str(a["motivation"]),
-            Paragraph(ill_text, cell_style), Paragraph(soreness_text, cell_style), str(a.get("load") or "—"),
-            str(a.get("weekLoad", 0)), str(a.get("monotony")) if a.get("monotony") is not None else "—",
-            str(a.get("strain")) if a.get("strain") is not None else "—",
-        ])
-        fills[1] = RL_FILLS[good_scale_status(a["sleep"])]
-        fills[2] = RL_FILLS[good_scale_status(a["hydration"])]
-        fills[3] = RL_FILLS[good_scale_status(a["motivation"])]
-        fills[4] = RL_FILLS["red"] if a.get("feelingIll") else RL_FILLS["green"]
-        fills[5] = RL_FILLS[soreness_status(a.get("sorenessAreas"), a.get("sorenessSeverity"))]
-        fills[6] = RL_FILLS[load_status(a.get("load"))]
-        if a.get("monotonyRisk"):
-            fills[8] = RL_FILLS[a["monotonyRisk"]]
-        row_fills.append(fills)
-
-    col_widths = [32 * mm, 12 * mm, 12 * mm, 12 * mm, 34 * mm, 34 * mm, 16 * mm, 16 * mm, 16 * mm, 14 * mm]
-    table = Table(table_rows, colWidths=col_widths, repeatRows=1)
-    style_cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1B4332")),
-        ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#CCCCCC")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (3, -1), "CENTER"),
-        ("ALIGN", (6, 0), (9, -1), "CENTER"),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]
-    for i, fills in enumerate(row_fills):
-        table_row = i + 1  # +1 for the header row
-        for col, color in fills.items():
-            style_cmds.append(("BACKGROUND", (col, table_row), (col, table_row), color))
-    table.setStyle(TableStyle(style_cmds))
-    story.append(table)
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(
-        "7-Day Load, Monotony and Strain cover the 7 days up to this date. Monotony (average daily load / its "
-        "day-to-day variation) of 2.0 or more is high, 1.5-2.0 is worth watching. These are rule-of-thumb "
-        "markers, not a diagnosis.", sub_style,
-    ))
-    doc.build(story)
-    return buf.getvalue()
-
-
 # ---------- Export / Report ----------
 @api_router.get("/export/excel")
 async def export_excel(user: dict = Depends(get_current_user)):
@@ -1127,17 +890,6 @@ async def export_excel(user: dict = Depends(get_current_user)):
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@api_router.get("/export/pdf")
-async def export_pdf(date: Optional[str] = None, user: dict = Depends(get_current_user)):
-    data = await build_pdf_bytes(parse_day(date))
-    d = parse_day(date) or today_str()
-    filename = f"Load and Recovery Monitoring Report - {d}.pdf"
-    return StreamingResponse(
-        io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -1167,7 +919,7 @@ async def send_report_now(user: dict = Depends(get_current_user)):
     result = await send_daily_report_email()
     if result is None:
         raise HTTPException(status_code=500, detail="Email could not be sent. Check Resend configuration.")
-    return {"status": "ok", "sent_to": await alert_recipients()}
+    return {"status": "ok", "sent_to": COACH_EMAIL}
 
 
 class DailyEmailSettings(BaseModel):
@@ -1178,7 +930,7 @@ class DailyEmailSettings(BaseModel):
 @api_router.get("/settings/daily-email")
 async def get_daily_email(user: dict = Depends(get_current_user)):
     s = await db.settings.find_one({"key": "daily_email"}, {"_id": 0})
-    return {"enabled": bool(s and s.get("enabled")), "hour": (s.get("hour") if s else 20), "recipients": await alert_recipients()}
+    return {"enabled": bool(s and s.get("enabled")), "hour": (s.get("hour") if s else 20), "recipient": COACH_EMAIL}
 
 
 @api_router.post("/settings/daily-email")
@@ -1297,7 +1049,7 @@ class WeeklyDigestSettings(BaseModel):
 @api_router.get("/settings/weekly-digest")
 async def get_weekly_digest(user: dict = Depends(get_current_user)):
     s = await db.settings.find_one({"key": "weekly_digest"}, {"_id": 0})
-    return {"enabled": bool(s and s.get("enabled")), "hour": (s.get("hour") if s else 8), "recipients": await alert_recipients()}
+    return {"enabled": bool(s and s.get("enabled")), "hour": (s.get("hour") if s else 8), "recipient": COACH_EMAIL}
 
 
 @api_router.post("/settings/weekly-digest")
@@ -1315,7 +1067,7 @@ async def send_weekly_now(user: dict = Depends(get_current_user)):
     result = await send_weekly_digest_email()
     if result is None:
         raise HTTPException(status_code=500, detail="Email could not be sent. Check Resend configuration.")
-    return {"status": "ok", "sent_to": await alert_recipients()}
+    return {"status": "ok", "sent_to": COACH_EMAIL}
 
 
 async def scheduled_weekly_digest():
@@ -1335,7 +1087,14 @@ async def scheduled_weekly_digest():
         logger.info("Sent scheduled weekly digest.")
 
 
+import platform_routes
+platform_routes.init(
+    db=db, send_email=send_email, hash_password=hash_password, verify_password=verify_password,
+    jwt_secret=JWT_SECRET, jwt_algorithm=JWT_ALGORITHM, now_utc=now_utc, today_str=today_str,
+)
+
 app.include_router(api_router)
+app.include_router(platform_routes.platform_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1354,6 +1113,7 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.roster.create_index("name", unique=True)
     await db.athlete_contacts.create_index("athlete_id", unique=True)
+    await platform_routes.ensure_indexes()
     # seed coach
     admin_email = os.environ.get('ADMIN_EMAIL', '').strip().lower()
     admin_password = os.environ.get('ADMIN_PASSWORD', '')
@@ -1362,12 +1122,10 @@ async def startup():
         await db.users.insert_one({
             "id": str(uuid.uuid4()), "email": admin_email,
             "password_hash": hash_password(admin_password), "name": "Coach",
-            "role": "coach", "receiveAlerts": True, "created_at": now_utc().isoformat(),
+            "role": "coach", "created_at": now_utc().isoformat(),
         })
         logger.info("Seeded coach account.")
-    elif not verify_password(admin_password, existing["password_hash"]) and not existing.get("passwordManaged"):
-        # Only re-syncs from ADMIN_PASSWORD until the account owner sets their own password in the app;
-        # after that, "passwordManaged" is set and this account is no longer overwritten on every restart.
+    elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
     # seed roster
     count = await db.roster.count_documents({})
