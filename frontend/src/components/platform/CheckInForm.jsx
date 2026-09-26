@@ -32,32 +32,33 @@ const Section = ({ icon: Icon, title, subtitle, children }) => (
 );
 
 /** onSubmit receives the payload minus `context`/`team_id` — caller adds those. */
-export function CheckInForm({ onSubmit }) {
+/** onSubmit receives the payload minus `context`/`team_id` — caller adds those.
+ *  Pass `initial` (an existing check-in) to pre-fill the form for editing. */
+export function CheckInForm({ onSubmit, initial = null, submitLabel = "Submit check-in" }) {
   const [submitting, setSubmitting] = useState(false);
 
-  const [sleepHours, setSleepHours] = useState("");
-  const [sleepQuality, setSleepQuality] = useState(0);
-  const [sleepNotes, setSleepNotes] = useState("");
-  const [hydration, setHydration] = useState(0);
-  const [motivation, setMotivation] = useState(0);
+  const [sleepHours, setSleepHours] = useState(initial?.sleepHours ?? "");
+  const [sleepQuality, setSleepQuality] = useState(initial?.sleepQuality ?? 0);
+  const [sleepNotes, setSleepNotes] = useState(initial?.sleepNotes ?? "");
+  const [hydration, setHydration] = useState(initial?.hydration ?? 0);
+  const [motivation, setMotivation] = useState(initial?.motivation ?? 0);
 
-  const [feelingIll, setFeelingIll] = useState(false);
-  const [symptoms, setSymptoms] = useState([]);
-  const [illnessSeverity, setIllnessSeverity] = useState("");
-  const [temperature, setTemperature] = useState("");
-  const [illnessNotes, setIllnessNotes] = useState("");
+  const [feelingIll, setFeelingIll] = useState(initial?.feelingIll ?? false);
+  const [symptoms, setSymptoms] = useState(initial?.symptoms ?? []);
+  const [illnessSeverity, setIllnessSeverity] = useState(initial?.illnessSeverity ?? "");
+  const [temperature, setTemperature] = useState(initial?.temperature ?? "");
+  const [illnessNotes, setIllnessNotes] = useState(initial?.illnessNotes ?? "");
 
-  const [hasSoreness, setHasSoreness] = useState(false);
-  const [sorenessAreas, setSorenessAreas] = useState([]);
-  const [sorenessSide, setSorenessSide] = useState("");
-  const [sorenessSeverity, setSorenessSeverity] = useState(3);
-  const [sorenessNotes, setSorenessNotes] = useState("");
+  const [hasSoreness, setHasSoreness] = useState((initial?.sorenessSeverity ?? 0) > 0);
+  const [sorenessAreas, setSorenessAreas] = useState(initial?.sorenessAreas ?? []);
+  const [sorenessSide, setSorenessSide] = useState(initial?.sorenessSide ?? "");
+  const [sorenessSeverity, setSorenessSeverity] = useState(initial?.sorenessSeverity ?? 3);
+  const [sorenessNotes, setSorenessNotes] = useState(initial?.sorenessNotes ?? "");
 
-  const [logSession, setLogSession] = useState(false);
-  const [sessionType, setSessionType] = useState("");
-  const [rpe, setRpe] = useState(0);
-  const [duration, setDuration] = useState("");
-  const [notes, setNotes] = useState("");
+  const [sessionType, setSessionType] = useState(initial?.sessionType ?? "");
+  const [rpe, setRpe] = useState(initial?.rpe ?? 0);
+  const [duration, setDuration] = useState(initial?.duration ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const durationMin = Math.round(Number(duration)) || 0;
   const load = rpe && durationMin ? Number(rpe) * durationMin : 0;
@@ -67,11 +68,9 @@ export function CheckInForm({ onSubmit }) {
 
   const submit = async () => {
     if (!sleepQuality || !hydration || !motivation) return toast.error("Please rate sleep, hydration and motivation");
-    if (logSession) {
-      if (!sessionType) return toast.error("Select your session type, or turn off session logging");
-      if (!rpe) return toast.error("Select your session RPE");
-      if (durationMin < 1) return toast.error("Enter your session duration (minutes)");
-    }
+    if (!sessionType) return toast.error("Select today's session type");
+    if (!rpe) return toast.error("Select today's session RPE");
+    if (durationMin < 1) return toast.error("Enter today's session duration (minutes)");
     setSubmitting(true);
     try {
       await onSubmit({
@@ -81,8 +80,7 @@ export function CheckInForm({ onSubmit }) {
         temperature: feelingIll ? temperature : "", illnessNotes: feelingIll ? illnessNotes : "",
         sorenessAreas: hasSoreness ? sorenessAreas : [], sorenessSide: hasSoreness ? sorenessSide : "",
         sorenessSeverity: hasSoreness ? sorenessSeverity : 0, sorenessNotes: hasSoreness ? sorenessNotes : "",
-        logSession, sessionType: logSession ? sessionType : "", rpe: logSession ? Number(rpe) : 0,
-        duration: logSession ? durationMin : 0, notes,
+        sessionType, rpe: Number(rpe), duration: durationMin, notes,
       });
     } finally {
       setSubmitting(false);
@@ -113,47 +111,39 @@ export function CheckInForm({ onSubmit }) {
         <WellnessRating value={motivation} onChange={setMotivation} testIdPrefix="motivation-rating" />
       </Section>
 
-      <Section icon={Dumbbell} title="Training session" subtitle="Optional — log your last session's load">
-        <div className="mb-4 flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <span className="text-sm font-medium">Log a training session</span>
-          <Switch checked={logSession} onCheckedChange={setLogSession} data-testid="log-session-toggle" />
-        </div>
-        <AnimatePresence>
-          {logSession && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session type</p>
-                <Select value={sessionType} onValueChange={setSessionType}>
-                  <SelectTrigger data-testid="session-type-input"><SelectValue placeholder="Select session type" /></SelectTrigger>
-                  <SelectContent>{SESSION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session RPE (1 = easy · 10 = max effort)</p>
-                <div className="grid grid-cols-5 gap-2 sm:grid-cols-10">
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <button key={n} type="button" data-testid={`rpe-score-selector-${n}`} onClick={() => setRpe(n)}
-                      className={`h-11 rounded-lg border text-sm font-bold transition-all active:scale-95 ${rpe === n ? "border-primary bg-primary text-primary-foreground scale-105" : "border-border bg-secondary text-muted-foreground hover:text-foreground"}`}>
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Duration (minutes)</p>
-                <Input type="number" inputMode="numeric" min={1} step={1} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 75" data-testid="session-duration-input" />
-              </div>
-              <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/50 px-4 py-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Training load</p>
+      <Section icon={Dumbbell} title="Training session" subtitle="Required — log today's session">
+        <div className="space-y-4">
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session type</p>
+            <Select value={sessionType} onValueChange={setSessionType}>
+              <SelectTrigger data-testid="session-type-input"><SelectValue placeholder="Select session type" /></SelectTrigger>
+              <SelectContent>{SESSION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Session RPE (1 = easy · 10 = max effort)</p>
+            <div className="grid grid-cols-5 gap-2 sm:grid-cols-10">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <button key={n} type="button" data-testid={`rpe-score-selector-${n}`} onClick={() => setRpe(n)}
+                  className={`h-11 rounded-lg border text-sm font-bold transition-all active:scale-95 ${rpe === n ? "border-primary bg-primary text-primary-foreground scale-105" : "border-border bg-secondary text-muted-foreground hover:text-foreground"}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Duration (minutes)</p>
+            <Input type="number" inputMode="numeric" min={1} step={1} value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 75" data-testid="session-duration-input" />
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/50 px-4 py-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Training load</p>
                   <p className={`font-mono text-2xl font-bold ${loadZone.cls}`}>{load}</p>
                 </div>
                 <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${loadZone.cls} border-current`}>{loadZone.label}</span>
               </div>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Session notes (optional)" rows={2} className="resize-none" data-testid="session-notes-input" />
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
       </Section>
 
       <Section icon={ShieldAlert} title="Feeling unwell?" subtitle="Flag anything your medical team should know">
@@ -247,7 +237,7 @@ export function CheckInForm({ onSubmit }) {
       </Section>
 
       <Button className="h-13 w-full text-base font-bold" style={{ height: 52 }} onClick={submit} disabled={submitting} data-testid="submit-checkin-button">
-        {submitting ? "Submitting…" : "Submit check-in"}
+        {submitting ? "Submitting…" : submitLabel}
       </Button>
     </div>
   );
