@@ -781,10 +781,10 @@ async def dashboard(date: Optional[str] = None, user: dict = Depends(get_current
     return data
 
 
-async def compute_athlete_trends(name: str, days: int = 7, end: Optional[str] = None) -> dict:
+@api_router.get("/trends")
+async def trends(name: str, days: int = 7, end: Optional[str] = None, user: dict = Depends(get_current_user)):
     """Per-athlete history for the last `days` days (7-90) ending on `end` (default today):
-    daily load / readiness / soreness / illness, plus weekly load, monotony, strain and change vs the previous week.
-    Shared by the coach's /trends route and the athlete-facing /my-stats route."""
+    daily load / readiness / soreness / illness, plus weekly load, monotony, strain and change vs the previous week."""
     days = max(7, min(int(days), 90))
     end_str = parse_day(end)
     end_day = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else datetime.now(TZ).date()
@@ -829,50 +829,6 @@ async def compute_athlete_trends(name: str, days: int = 7, end: Optional[str] = 
         st["changePct"] = change_pct(st["load"], st["prevLoad"])
         weeks.append(st)
     return {"name": name, "range": days, "end": date_strs[-1], "days": all_days[-days:], "weeks": weeks}
-
-
-@api_router.get("/trends")
-async def trends(name: str, days: int = 7, end: Optional[str] = None, user: dict = Depends(get_current_user)):
-    return await compute_athlete_trends(name, days, end)
-
-
-# ---------- Team access code (athletes' own "My Stats" page) ----------
-class TeamCodePayload(BaseModel):
-    code: str
-
-
-async def get_team_code() -> str:
-    doc = await db.settings.find_one({"key": "team_access_code"}, {"_id": 0})
-    return (doc or {}).get("code", "")
-
-
-@api_router.get("/team-access-code")
-async def team_access_code(user: dict = Depends(get_current_user)):
-    return {"code": await get_team_code()}
-
-
-@api_router.put("/team-access-code")
-async def set_team_access_code(payload: TeamCodePayload, user: dict = Depends(get_current_user)):
-    code = payload.code.strip()
-    if code and not (4 <= len(code) <= 20):
-        raise HTTPException(status_code=400, detail="Code must be 4-20 characters (or blank to turn My Stats off)")
-    await db.settings.update_one({"key": "team_access_code"}, {"$set": {"code": code}}, upsert=True)
-    return {"code": code}
-
-
-@api_router.get("/my-stats")
-async def my_stats(name: str, code: str, days: int = 7, end: Optional[str] = None):
-    """Public but code-gated: lets an athlete see their OWN history (load, readiness, illness, soreness) with
-    a single team-wide access code set by the coach - no per-athlete login or email. Never lists other athletes'
-    data; the caller must already know their own name (from the public roster) and the shared code."""
-    team_code = await get_team_code()
-    if not team_code:
-        raise HTTPException(status_code=403, detail="My Stats isn't turned on yet. Ask your medical team to set an access code.")
-    if code.strip() != team_code:
-        raise HTTPException(status_code=403, detail="That access code isn't right. Ask your medical team for the current one.")
-    if not await db.roster.find_one({"name": name}, {"_id": 1}):
-        raise HTTPException(status_code=404, detail="That name isn't on the roster.")
-    return await compute_athlete_trends(name, days, end)
 
 
 HEATMAP_AREAS = ["Lower Back", "Hamstrings", "Quadriceps", "Calves", "Shoulders", "Gluteus", "Groin", "Upper Back / Neck"]
