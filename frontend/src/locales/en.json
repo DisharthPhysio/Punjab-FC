@@ -1,1 +1,149 @@
-
+{
+  "common": {
+    "back": "Back",
+    "continue": "Continue",
+    "loading": "Loading…",
+    "cancel": "Cancel",
+    "save": "Save",
+    "pleaseWait": "Please wait…"
+  },
+  "languageSwitcher": {
+    "label": "Language"
+  },
+  "landing": {
+    "brand": "Load & Recovery Platform",
+    "title": "Welcome back",
+    "subtitle": "How would you like to sign in?",
+    "athleteTitle": "I'm an Athlete",
+    "athleteDesc": "Log your daily check-in, on your own or as part of a team.",
+    "teamTitle": "I'm a Team / Coach",
+    "teamDesc": "Register a new team or access an existing one as an admin.",
+    "continueCta": "Continue"
+  },
+  "athleteEntry": {
+    "title": "Athlete",
+    "subtitle": "How would you like to check in?",
+    "individualTitle": "Individual athlete",
+    "individualDesc": "Log in with your email to check in on your own.",
+    "teamTitle": "I have a team code",
+    "teamDesc": "No account needed — enter your team's code and pick your name."
+  },
+  "athleteAuth": {
+    "title": "Individual athlete",
+    "subtitle": "Use your personal email to continue",
+    "login": "Log in",
+    "signup": "Sign up",
+    "fullName": "Full name",
+    "namePlaceholder": "Your name",
+    "email": "Email",
+    "password": "Password",
+    "passwordPlaceholder": "At least 6 characters",
+    "forgotPassword": "Forgot password?",
+    "createAccount": "Create account"
+  },
+  "joinTeam": {
+    "joinTitle": "Join a team",
+    "joinSubtitle": "Enter the 6-digit code your team gave you",
+    "lookingUp": "Looking up…",
+    "whichName": "Which name on the roster is you?",
+    "alreadyJoined": "already joined — pick this if it's you",
+    "thisIsMe": "This is me",
+    "confirming": "Confirming…",
+    "noPlayers": "No players on this roster yet. Ask your team admin to add you."
+  },
+  "checkIn": {
+    "sleep": {
+      "title": "Sleep",
+      "subtitle": "Hours slept and how rested you feel",
+      "hoursLabel": "Hours of sleep",
+      "hoursPlaceholder": "e.g. 7.5",
+      "qualityLabel": "Sleep quality · 1 = terrible · 5 = fully rested",
+      "notesPlaceholder": "Any notes on your sleep? (optional)"
+    },
+    "hydration": { "title": "Hydration", "subtitle": "How well hydrated do you feel?" },
+    "motivation": { "title": "Motivation / Mood", "subtitle": "How's your drive today?" },
+    "session": {
+      "title": "Training session",
+      "subtitle": "Required — log today's session",
+      "typeLabel": "Session type",
+      "typePlaceholder": "Select session type",
+      "rpeLabel": "Session RPE (1 = easy · 10 = max effort)",
+      "durationLabel": "Duration (minutes)",
+      "durationPlaceholder": "e.g. 75",
+      "loadLabel": "Training load",
+      "notesPlaceholder": "Session notes (optional)",
+      "low": "Low", "moderate": "Moderate", "high": "High"
+    },
+    "illness": {
+      "title": "Feeling unwell?",
+      "subtitle": "Flag anything your medical team should know",
+      "toggle": "I'm feeling ill today",
+      "symptomsLabel": "Symptoms",
+      "severityLabel": "Severity",
+      "tempLabel": "Temp (°C)",
+      "notesPlaceholder": "Anything else? (optional)"
+    },
+    "soreness": {
+      "title": "Muscle soreness",
+      "subtitle": "Any areas feeling tight or sore?",
+      "toggle": "I have soreness to report",
+      "sideLabel": "Side",
+      "severityLabel": "Severity",
+      "notesPlaceholder": "Describe the soreness (optional)"
+    },
+    "submit": "Submit check-in",
+    "saveChanges": "Save changes",
+    "submitting": "Submitting…",
+    "validation": {
+      "ratings": "Please rate sleep, hydration and motivation",
+      "sessionType": "Select today's session type",
+      "rpe": "Select today's session RPE",
+      "duration": "Enter today's session duration (minutes)"
+    }
+  },
+  "history": {
+    "title": "Your history",
+    "empty": "No check-ins yet — today's will show up here.",
+    "flagged": "Flagged",
+    "deleteConfirmTitle": "Delete this check-in?",
+    "deleteConfirmDesc": "This can't be undone. You'll be able to submit a new one for that day.",
+    "delete": "Delete"
+  },
+  "individualCheckIn": {
+    "title": "Individual check-in",
+    "subtitle": "Takes under a minute",
+    "doneTitle": "You're all set for today",
+    "doneSubtitle": "You can still edit today's entry if something changes.",
+    "editToday": "Edit today's entry"
+  },
+  "teamHub": {
+    "checkInTab": "Check-in",
+    "statsTab": "My stats",
+    "doneTitle": "You're all set for today",
+    "doneSubtitle": "Your team's medical staff can see this check-in."
+  },
+  "exitConfirm": {
+    "title": "Exit and log out?",
+    "description": "You'll be signed out and need to log in again next time.",
+    "stay": "Stay",
+    "logout": "Log out"
+  },
+  "values": {
+    "symptoms": {
+      "Sore throat": "Sore throat", "Cough": "Cough", "Fever": "Fever", "Runny nose": "Runny nose",
+      "Headache": "Headache", "Fatigue": "Fatigue", "Stomach ache": "Stomach ache",
+      "Constipation": "Constipation", "Diarrhea": "Diarrhea", "Body ache": "Body ache"
+    },
+    "sorenessAreas": {
+      "Lower Back": "Lower Back", "Hamstrings": "Hamstrings", "Quadriceps": "Quadriceps",
+      "Calves": "Calves", "Shoulders": "Shoulders", "Gluteus": "Gluteus", "Groin": "Groin",
+      "Upper Back / Neck": "Upper Back / Neck"
+    },
+    "sorenessSides": { "Right": "Right", "Left": "Left", "Both": "Both" },
+    "sessionTypes": {
+      "Field / Pitch": "Field / Pitch", "Gym / Strength": "Gym / Strength", "Conditioning": "Conditioning",
+      "Match / Game": "Match / Game", "Recovery": "Recovery", "Skills": "Skills"
+    },
+    "illnessSeverity": { "Mild": "Mild", "Moderate": "Moderate", "Severe": "Severe" }
+  }
+}

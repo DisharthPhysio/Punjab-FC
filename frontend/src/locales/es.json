@@ -1,0 +1,149 @@
+{
+  "common": {
+    "back": "Atrás",
+    "continue": "Continuar",
+    "loading": "Cargando…",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "pleaseWait": "Un momento…"
+  },
+  "languageSwitcher": {
+    "label": "Idioma"
+  },
+  "landing": {
+    "brand": "Plataforma de Carga y Recuperación",
+    "title": "Bienvenido de nuevo",
+    "subtitle": "¿Cómo te gustaría iniciar sesión?",
+    "athleteTitle": "Soy un Atleta",
+    "athleteDesc": "Registra tu check-in diario, solo o como parte de un equipo.",
+    "teamTitle": "Soy un Equipo / Entrenador",
+    "teamDesc": "Registra un nuevo equipo o accede a uno existente como administrador.",
+    "continueCta": "Continuar"
+  },
+  "athleteEntry": {
+    "title": "Atleta",
+    "subtitle": "¿Cómo te gustaría hacer el check-in?",
+    "individualTitle": "Atleta individual",
+    "individualDesc": "Inicia sesión con tu correo para hacer el check-in por tu cuenta.",
+    "teamTitle": "Tengo un código de equipo",
+    "teamDesc": "No necesitas una cuenta — introduce el código de tu equipo y elige tu nombre."
+  },
+  "athleteAuth": {
+    "title": "Atleta individual",
+    "subtitle": "Usa tu correo personal para continuar",
+    "login": "Iniciar sesión",
+    "signup": "Registrarse",
+    "fullName": "Nombre completo",
+    "namePlaceholder": "Tu nombre",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "passwordPlaceholder": "Al menos 6 caracteres",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "createAccount": "Crear cuenta"
+  },
+  "joinTeam": {
+    "joinTitle": "Unirse a un equipo",
+    "joinSubtitle": "Introduce el código de 6 dígitos de tu equipo",
+    "lookingUp": "Buscando…",
+    "whichName": "¿Cuál nombre de la plantilla eres tú?",
+    "alreadyJoined": "ya se unió — elige este si eres tú",
+    "thisIsMe": "Este soy yo",
+    "confirming": "Confirmando…",
+    "noPlayers": "Todavía no hay jugadores en esta plantilla. Pide a tu entrenador que te añada."
+  },
+  "checkIn": {
+    "sleep": {
+      "title": "Sueño",
+      "subtitle": "Horas dormidas y qué tan descansado te sientes",
+      "hoursLabel": "Horas de sueño",
+      "hoursPlaceholder": "ej. 7.5",
+      "qualityLabel": "Calidad del sueño · 1 = pésima · 5 = totalmente descansado",
+      "notesPlaceholder": "¿Alguna nota sobre tu sueño? (opcional)"
+    },
+    "hydration": { "title": "Hidratación", "subtitle": "¿Qué tan hidratado te sientes?" },
+    "motivation": { "title": "Motivación / Ánimo", "subtitle": "¿Cómo está tu energía hoy?" },
+    "session": {
+      "title": "Sesión de entrenamiento",
+      "subtitle": "Obligatorio — registra la sesión de hoy",
+      "typeLabel": "Tipo de sesión",
+      "typePlaceholder": "Selecciona el tipo de sesión",
+      "rpeLabel": "RPE de la sesión (1 = fácil · 10 = esfuerzo máximo)",
+      "durationLabel": "Duración (minutos)",
+      "durationPlaceholder": "ej. 75",
+      "loadLabel": "Carga de entrenamiento",
+      "notesPlaceholder": "Notas de la sesión (opcional)",
+      "low": "Baja", "moderate": "Moderada", "high": "Alta"
+    },
+    "illness": {
+      "title": "¿Te sientes mal?",
+      "subtitle": "Indica cualquier cosa que tu equipo médico deba saber",
+      "toggle": "Hoy me siento enfermo",
+      "symptomsLabel": "Síntomas",
+      "severityLabel": "Gravedad",
+      "tempLabel": "Temp (°C)",
+      "notesPlaceholder": "¿Algo más? (opcional)"
+    },
+    "soreness": {
+      "title": "Dolor muscular",
+      "subtitle": "¿Alguna zona se siente cargada o adolorida?",
+      "toggle": "Tengo dolor muscular que reportar",
+      "sideLabel": "Lado",
+      "severityLabel": "Gravedad",
+      "notesPlaceholder": "Describe el dolor (opcional)"
+    },
+    "submit": "Enviar check-in",
+    "saveChanges": "Guardar cambios",
+    "submitting": "Enviando…",
+    "validation": {
+      "ratings": "Por favor califica sueño, hidratación y motivación",
+      "sessionType": "Selecciona el tipo de sesión de hoy",
+      "rpe": "Selecciona el RPE de la sesión de hoy",
+      "duration": "Introduce la duración de la sesión de hoy (minutos)"
+    }
+  },
+  "history": {
+    "title": "Tu historial",
+    "empty": "Aún no hay check-ins — el de hoy aparecerá aquí.",
+    "flagged": "Marcado",
+    "deleteConfirmTitle": "¿Eliminar este check-in?",
+    "deleteConfirmDesc": "Esto no se puede deshacer. Podrás enviar uno nuevo para ese día.",
+    "delete": "Eliminar"
+  },
+  "individualCheckIn": {
+    "title": "Check-in individual",
+    "subtitle": "Toma menos de un minuto",
+    "doneTitle": "Ya está todo listo por hoy",
+    "doneSubtitle": "Aún puedes editar la entrada de hoy si algo cambia.",
+    "editToday": "Editar la entrada de hoy"
+  },
+  "teamHub": {
+    "checkInTab": "Check-in",
+    "statsTab": "Mis estadísticas",
+    "doneTitle": "Ya está todo listo por hoy",
+    "doneSubtitle": "El personal médico de tu equipo puede ver este check-in."
+  },
+  "exitConfirm": {
+    "title": "¿Salir y cerrar sesión?",
+    "description": "Cerrarás sesión y deberás iniciar sesión de nuevo la próxima vez.",
+    "stay": "Quedarme",
+    "logout": "Cerrar sesión"
+  },
+  "values": {
+    "symptoms": {
+      "Sore throat": "Dolor de garganta", "Cough": "Tos", "Fever": "Fiebre", "Runny nose": "Moqueo nasal",
+      "Headache": "Dolor de cabeza", "Fatigue": "Fatiga", "Stomach ache": "Dolor de estómago",
+      "Constipation": "Estreñimiento", "Diarrhea": "Diarrea", "Body ache": "Dolor corporal"
+    },
+    "sorenessAreas": {
+      "Lower Back": "Zona lumbar", "Hamstrings": "Isquiotibiales", "Quadriceps": "Cuádriceps",
+      "Calves": "Pantorrillas", "Shoulders": "Hombros", "Gluteus": "Glúteos", "Groin": "Ingle",
+      "Upper Back / Neck": "Espalda alta / Cuello"
+    },
+    "sorenessSides": { "Right": "Derecho", "Left": "Izquierdo", "Both": "Ambos" },
+    "sessionTypes": {
+      "Field / Pitch": "Campo", "Gym / Strength": "Gimnasio / Fuerza", "Conditioning": "Acondicionamiento",
+      "Match / Game": "Partido", "Recovery": "Recuperación", "Skills": "Técnica"
+    },
+    "illnessSeverity": { "Mild": "Leve", "Moderate": "Moderado", "Severe": "Severo" }
+  }
+}

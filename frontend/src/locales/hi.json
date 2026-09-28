@@ -1,0 +1,149 @@
+{
+  "common": {
+    "back": "वापस",
+    "continue": "जारी रखें",
+    "loading": "लोड हो रहा है…",
+    "cancel": "रद्द करें",
+    "save": "सहेजें",
+    "pleaseWait": "कृपया प्रतीक्षा करें…"
+  },
+  "languageSwitcher": {
+    "label": "भाषा"
+  },
+  "landing": {
+    "brand": "लोड एंड रिकवरी प्लेटफ़ॉर्म",
+    "title": "वापसी पर स्वागत है",
+    "subtitle": "आप कैसे लॉग इन करना चाहेंगे?",
+    "athleteTitle": "मैं एक एथलीट हूं",
+    "athleteDesc": "अपने दैनिक चेक-इन को अकेले या टीम के हिस्से के रूप में लॉग करें।",
+    "teamTitle": "मैं एक टीम / कोच हूं",
+    "teamDesc": "नई टीम पंजीकृत करें या एडमिन के रूप में मौजूदा टीम एक्सेस करें।",
+    "continueCta": "जारी रखें"
+  },
+  "athleteEntry": {
+    "title": "एथलीट",
+    "subtitle": "आप कैसे चेक-इन करना चाहेंगे?",
+    "individualTitle": "व्यक्तिगत एथलीट",
+    "individualDesc": "अकेले चेक-इन करने के लिए अपने ईमेल से लॉग इन करें।",
+    "teamTitle": "मेरे पास टीम कोड है",
+    "teamDesc": "किसी खाते की आवश्यकता नहीं — अपनी टीम का कोड डालें और अपना नाम चुनें।"
+  },
+  "athleteAuth": {
+    "title": "व्यक्तिगत एथलीट",
+    "subtitle": "जारी रखने के लिए अपना व्यक्तिगत ईमेल उपयोग करें",
+    "login": "लॉग इन करें",
+    "signup": "साइन अप करें",
+    "fullName": "पूरा नाम",
+    "namePlaceholder": "आपका नाम",
+    "email": "ईमेल",
+    "password": "पासवर्ड",
+    "passwordPlaceholder": "कम से कम 6 अक्षर",
+    "forgotPassword": "पासवर्ड भूल गए?",
+    "createAccount": "खाता बनाएं"
+  },
+  "joinTeam": {
+    "joinTitle": "टीम जॉइन करें",
+    "joinSubtitle": "अपनी टीम का दिया गया 6-अंकीय कोड डालें",
+    "lookingUp": "खोजा जा रहा है…",
+    "whichName": "रोस्टर में कौन सा नाम आप हैं?",
+    "alreadyJoined": "पहले से जुड़ा हुआ है — अगर यह आप हैं तो इसे चुनें",
+    "thisIsMe": "यह मैं हूं",
+    "confirming": "पुष्टि हो रही है…",
+    "noPlayers": "इस रोस्टर में अभी कोई खिलाड़ी नहीं है। अपनी टीम के एडमिन से जुड़वाने को कहें।"
+  },
+  "checkIn": {
+    "sleep": {
+      "title": "नींद",
+      "subtitle": "सोने के घंटे और आप कितना तरोताज़ा महसूस करते हैं",
+      "hoursLabel": "नींद के घंटे",
+      "hoursPlaceholder": "जैसे 7.5",
+      "qualityLabel": "नींद की गुणवत्ता · 1 = बहुत खराब · 5 = पूरी तरह तरोताज़ा",
+      "notesPlaceholder": "नींद के बारे में कोई टिप्पणी? (वैकल्पिक)"
+    },
+    "hydration": { "title": "हाइड्रेशन", "subtitle": "आप कितना हाइड्रेटेड महसूस करते हैं?" },
+    "motivation": { "title": "प्रेरणा / मूड", "subtitle": "आज आपका जोश कैसा है?" },
+    "session": {
+      "title": "प्रशिक्षण सत्र",
+      "subtitle": "आवश्यक — आज का सत्र दर्ज करें",
+      "typeLabel": "सत्र का प्रकार",
+      "typePlaceholder": "सत्र प्रकार चुनें",
+      "rpeLabel": "सत्र आरपीई (1 = आसान · 10 = अधिकतम प्रयास)",
+      "durationLabel": "अवधि (मिनट)",
+      "durationPlaceholder": "जैसे 75",
+      "loadLabel": "प्रशिक्षण भार",
+      "notesPlaceholder": "सत्र टिप्पणियां (वैकल्पिक)",
+      "low": "कम", "moderate": "मध्यम", "high": "अधिक"
+    },
+    "illness": {
+      "title": "तबीयत ठीक नहीं है?",
+      "subtitle": "जो भी आपकी मेडिकल टीम को जानना चाहिए उसे बताएं",
+      "toggle": "आज मेरी तबीयत ठीक नहीं है",
+      "symptomsLabel": "लक्षण",
+      "severityLabel": "गंभीरता",
+      "tempLabel": "तापमान (°C)",
+      "notesPlaceholder": "और कुछ? (वैकल्पिक)"
+    },
+    "soreness": {
+      "title": "मांसपेशियों में दर्द",
+      "subtitle": "कोई हिस्सा अकड़न या दर्द महसूस कर रहा है?",
+      "toggle": "मुझे दर्द की शिकायत है",
+      "sideLabel": "तरफ",
+      "severityLabel": "गंभीरता",
+      "notesPlaceholder": "दर्द के बारे में बताएं (वैकल्पिक)"
+    },
+    "submit": "चेक-इन जमा करें",
+    "saveChanges": "बदलाव सहेजें",
+    "submitting": "जमा हो रहा है…",
+    "validation": {
+      "ratings": "कृपया नींद, हाइड्रेशन और प्रेरणा को रेट करें",
+      "sessionType": "आज का सत्र प्रकार चुनें",
+      "rpe": "आज का सत्र आरपीई चुनें",
+      "duration": "आज के सत्र की अवधि (मिनट) दर्ज करें"
+    }
+  },
+  "history": {
+    "title": "आपका इतिहास",
+    "empty": "अभी तक कोई चेक-इन नहीं — आज का यहां दिखेगा।",
+    "flagged": "चिह्नित",
+    "deleteConfirmTitle": "यह चेक-इन हटाएं?",
+    "deleteConfirmDesc": "इसे पूर्ववत नहीं किया जा सकता। आप उस दिन के लिए नया चेक-इन जमा कर सकेंगे।",
+    "delete": "हटाएं"
+  },
+  "individualCheckIn": {
+    "title": "व्यक्तिगत चेक-इन",
+    "subtitle": "एक मिनट से भी कम समय लगता है",
+    "doneTitle": "आज के लिए सब तैयार है",
+    "doneSubtitle": "कुछ बदलने पर आप आज की एंट्री को अब भी संपादित कर सकते हैं।",
+    "editToday": "आज की एंट्री संपादित करें"
+  },
+  "teamHub": {
+    "checkInTab": "चेक-इन",
+    "statsTab": "मेरे आंकड़े",
+    "doneTitle": "आज के लिए सब तैयार है",
+    "doneSubtitle": "आपकी टीम का मेडिकल स्टाफ यह चेक-इन देख सकता है।"
+  },
+  "exitConfirm": {
+    "title": "बाहर निकलें और लॉग आउट करें?",
+    "description": "आप लॉग आउट हो जाएंगे और अगली बार फिर से लॉग इन करना होगा।",
+    "stay": "रुकें",
+    "logout": "लॉग आउट करें"
+  },
+  "values": {
+    "symptoms": {
+      "Sore throat": "गले में खराश", "Cough": "खांसी", "Fever": "बुखार", "Runny nose": "बहती नाक",
+      "Headache": "सिरदर्द", "Fatigue": "थकान", "Stomach ache": "पेट दर्द",
+      "Constipation": "कब्ज़", "Diarrhea": "दस्त", "Body ache": "बदन दर्द"
+    },
+    "sorenessAreas": {
+      "Lower Back": "पीठ का निचला हिस्सा", "Hamstrings": "हैमस्ट्रिंग", "Quadriceps": "क्वाड्रिसेप्स",
+      "Calves": "पिंडली", "Shoulders": "कंधे", "Gluteus": "ग्लूटस", "Groin": "जांघ का जोड़",
+      "Upper Back / Neck": "ऊपरी पीठ / गर्दन"
+    },
+    "sorenessSides": { "Right": "दायाँ", "Left": "बायाँ", "Both": "दोनों" },
+    "sessionTypes": {
+      "Field / Pitch": "मैदान", "Gym / Strength": "जिम / शक्ति प्रशिक्षण", "Conditioning": "कंडीशनिंग",
+      "Match / Game": "मैच / खेल", "Recovery": "रिकवरी", "Skills": "कौशल"
+    },
+    "illnessSeverity": { "Mild": "हल्का", "Moderate": "मध्यम", "Severe": "गंभीर" }
+  }
+}
