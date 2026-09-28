@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle, MessageCircle, Satellite } from "lucide-react";
+import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle, MessageCircle, Satellite, CalendarDays } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -152,6 +152,9 @@ export default function TeamHome() {
           </Button>
           <Button variant="outline" onClick={() => navigate("/team/gps")} className="gap-1.5" data-testid="gps-data-link">
             <Satellite className="h-4 w-4" /> GPS data
+          </Button>
+          <Button variant="outline" onClick={() => navigate("/team/calendar")} className="gap-1.5" data-testid="calendar-link">
+            <CalendarDays className="h-4 w-4" /> Day-by-day
           </Button>
           {dash && (
             <ExportButtons pdfUrl="/team/export/pdf" excelUrl="/team/export/excel" filename={`${dash.team_name}-report`} canShare={false} />

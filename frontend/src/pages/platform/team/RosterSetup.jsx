@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Users, Plus, X, RotateCcw } from "lucide-react";
+import { Users, Plus, X } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { Button } from "@/components/ui/button";
@@ -49,16 +49,6 @@ export default function RosterSetup() {
     }
   };
 
-  const resetClaim = async (id, name) => {
-    try {
-      await apiV2.post(`/team/roster/${id}/unclaim`);
-      toast.success(`${name}'s slot was reset — they can rejoin with the team code.`);
-      await load();
-    } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail));
-    }
-  };
-
   return (
     <AuthShell icon={Users} title="Build your roster" subtitle="Add each player's name and contact info" backTo="/team/home" maxWidth="max-w-lg">
       <form onSubmit={addPlayer} className="mb-5 flex flex-col gap-2 sm:flex-row">
@@ -80,19 +70,17 @@ export default function RosterSetup() {
                 <span className={p.joined ? "text-emerald-600 dark:text-emerald-400" : ""}>{p.joined ? "Joined" : "Not joined"}</span>
               </p>
             </div>
-            <div className="flex items-center gap-1">
-              {p.joined && (
-                <button onClick={() => resetClaim(p.id, p.name)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" title="Reset their claim (e.g. lost device, wrong name)" aria-label={`Reset ${p.name}'s claim`}>
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <button onClick={() => removePlayer(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label={`Remove ${p.name}`}>
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+            <button onClick={() => removePlayer(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label={`Remove ${p.name}`}>
+              <X className="h-4 w-4" />
+            </button>
           </div>
         ))}
       </div>
+
+      <p className="mb-4 text-xs text-muted-foreground">
+        A player can always log in on a new device just by entering the team code and picking their
+        name again — there's no "reset" step needed anymore.
+      </p>
 
       <Button className="w-full" size="lg" onClick={() => navigate("/team/home")} data-testid="roster-continue">
         {players.length > 0 ? "Continue" : "Skip for now"}
