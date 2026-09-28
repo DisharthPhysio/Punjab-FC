@@ -1,31 +1,22 @@
 import { useNavigate } from "react-router-dom";
 import { useRef } from "react";
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 import { User, ShieldCheck, Activity, ChevronRight } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-
-const OPTIONS = [
-  {
-    key: "athlete",
-    title: "I'm an Athlete",
-    desc: "Log your daily check-in, on your own or as part of a team.",
-    icon: User,
-    to: "/athlete",
-  },
-  {
-    key: "team",
-    title: "I'm a Team / Coach",
-    desc: "Register a new team or access an existing one as an admin.",
-    icon: ShieldCheck,
-    to: "/team",
-  },
-];
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const LONG_PRESS_MS = 3000;
 
 export default function Landing() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const pressTimer = useRef(null);
+
+  const OPTIONS = [
+    { key: "athlete", title: t("landing.athleteTitle"), desc: t("landing.athleteDesc"), icon: User, to: "/athlete" },
+    { key: "team", title: t("landing.teamTitle"), desc: t("landing.teamDesc"), icon: ShieldCheck, to: "/team" },
+  ];
 
   // Hidden site-admin entry point: press and hold the title. Pointer capture keeps
   // this element receiving events for the held finger even if it drifts slightly,
@@ -48,9 +39,12 @@ export default function Landing() {
           onPointerCancel={cancelPress}
         >
           <Activity className="h-4 w-4 text-primary" />
-          Load &amp; Recovery Platform
+          {t("landing.brand")}
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-1">
+          <LanguageSwitcher />
+          <ThemeToggle />
+        </div>
       </div>
 
       <div className="mx-auto flex min-h-[calc(100vh-72px)] max-w-3xl flex-col items-center justify-center px-5 py-12 sm:px-8">
@@ -60,8 +54,8 @@ export default function Landing() {
           transition={{ duration: 0.4, ease: "easeOut" }}
           className="mb-10 text-center"
         >
-          <h1 className="display text-4xl font-extrabold tracking-tight sm:text-5xl">Welcome back</h1>
-          <p className="mt-3 text-base text-muted-foreground">How would you like to sign in?</p>
+          <h1 className="display text-4xl font-extrabold tracking-tight sm:text-5xl">{t("landing.title")}</h1>
+          <p className="mt-3 text-base text-muted-foreground">{t("landing.subtitle")}</p>
         </motion.div>
 
         <div className="grid w-full gap-4 sm:grid-cols-2">
@@ -83,7 +77,7 @@ export default function Landing() {
                 <p className="mt-1 text-sm text-muted-foreground">{opt.desc}</p>
               </div>
               <div className="mt-auto flex items-center gap-1 text-sm font-semibold text-primary">
-                Continue <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                {t("landing.continueCta")} <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </div>
             </motion.button>
           ))}
