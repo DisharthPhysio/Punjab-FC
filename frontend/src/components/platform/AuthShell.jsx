@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { BackButton } from "./BackButton";
 import { ExitConfirmButton } from "./ExitConfirmButton";
 
@@ -12,7 +13,10 @@ export function AuthShell({ title, subtitle, icon: Icon, backTo = "/", exitConfi
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-5 pt-5 sm:px-8">
         {exitConfirm ? <ExitConfirmButton /> : <BackButton to={backTo} />}
-        <ThemeToggle />
+        <div className="flex items-center gap-1">
+          <LanguageSwitcher />
+          <ThemeToggle />
+        </div>
       </div>
       <div className={`mx-auto ${maxWidth} px-5 pb-16 pt-8 sm:px-0`}>
         <motion.div

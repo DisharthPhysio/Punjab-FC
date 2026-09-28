@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 
 /** Back arrow, present on every platform page (item 9).
@@ -8,8 +9,9 @@ import { ArrowLeft } from "lucide-react";
  * arrived, redirects/replace navigations shift it further, so two people on
  * the same screen could get two different "back" results. A fixed `to` is
  * predictable every time. Defaults to the landing page if none is given. */
-export function BackButton({ to = "/", label = "Back" }) {
+export function BackButton({ to = "/", label }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -18,7 +20,7 @@ export function BackButton({ to = "/", label = "Back" }) {
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/50"
     >
       <ArrowLeft className="h-4 w-4" />
-      {label}
+      {label || t("common.back")}
     </button>
   );
 }

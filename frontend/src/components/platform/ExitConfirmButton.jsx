@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import {
@@ -11,9 +12,10 @@ import {
  * Going further back from here means leaving the logged-in area entirely, so
  * it asks first and, on confirm, logs out — the person has to log in again
  * next time, exactly like a deliberate sign-out. */
-export function ExitConfirmButton({ label = "Back" }) {
+export function ExitConfirmButton({ label }) {
   const navigate = useNavigate();
   const { logout } = usePlatformAuth();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   const confirmExit = () => {
@@ -31,19 +33,17 @@ export function ExitConfirmButton({ label = "Back" }) {
           className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/50"
         >
           <ArrowLeft className="h-4 w-4" />
-          {label}
+          {label || t("common.back")}
         </button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Exit and log out?</AlertDialogTitle>
-          <AlertDialogDescription>
-            You'll be signed out and need to log in again next time.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{t("exitConfirm.title")}</AlertDialogTitle>
+          <AlertDialogDescription>{t("exitConfirm.description")}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel data-testid="exit-confirm-cancel">Stay</AlertDialogCancel>
-          <AlertDialogAction onClick={confirmExit} data-testid="exit-confirm-ok">Log out</AlertDialogAction>
+          <AlertDialogCancel data-testid="exit-confirm-cancel">{t("exitConfirm.stay")}</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmExit} data-testid="exit-confirm-ok">{t("exitConfirm.logout")}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
