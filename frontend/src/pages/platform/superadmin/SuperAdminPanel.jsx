@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ShieldAlert, Trash2, RotateCcw, LogOut, Mail, ChevronDown, ChevronRight } from "lucide-react";
+import { ShieldAlert, Trash2, LogOut, ChevronDown, ChevronRight } from "lucide-react";
 import apiSuperAdmin, { formatApiError } from "@/lib/apiSuperAdmin";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -52,17 +51,6 @@ function TeamRosterRow({ team, onChanged }) {
     if (!players) load();
   };
 
-  const unclaim = async (playerId) => {
-    try {
-      await apiSuperAdmin.post(`/superadmin/team-players/${playerId}/unclaim`);
-      toast.success("Reset — they can rejoin with the team code.");
-      load();
-      onChanged?.();
-    } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail));
-    }
-  };
-
   const deleteTeam = async () => {
     try {
       const res = await apiSuperAdmin.delete(`/superadmin/teams/${team.id}`);
@@ -91,11 +79,6 @@ function TeamRosterRow({ team, onChanged }) {
                 <p className="text-sm font-medium">{p.name}</p>
                 <p className="text-xs text-muted-foreground">{p.joined ? "Joined" : "Not joined"}{p.contact ? ` · ${p.contact}` : ""}</p>
               </div>
-              {p.joined && (
-                <button onClick={() => unclaim(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" title="Reset claim" aria-label={`Reset ${p.name}`}>
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
             </div>
           ))}
           {players?.length === 0 && <p className="py-2 text-center text-xs text-muted-foreground">No players yet.</p>}
@@ -131,9 +114,6 @@ export default function SuperAdminPanel() {
   const [athletes, setAthletes] = useState(null);
   const [admins, setAdmins] = useState(null);
   const [teams, setTeams] = useState(null);
-  const [emailTeamId, setEmailTeamId] = useState("");
-  const [emailTo, setEmailTo] = useState("");
-  const [sendingEmail, setSendingEmail] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -180,19 +160,6 @@ export default function SuperAdminPanel() {
       toast.success("Admin account removed");
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
-    }
-  };
-
-  const sendSummary = async () => {
-    if (!emailTeamId || !emailTo.trim()) return toast.error("Pick a team and enter an email");
-    setSendingEmail(true);
-    try {
-      const res = await apiSuperAdmin.post("/superadmin/email-team-summary", { team_id: emailTeamId, to_email: emailTo.trim() });
-      toast.success(res.data.message);
-    } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail));
-    } finally {
-      setSendingEmail(false);
     }
   };
 
@@ -258,32 +225,9 @@ export default function SuperAdminPanel() {
             </TabsContent>
 
             <TabsContent value="teams">
-              <div className="mb-6 space-y-2">
+              <div className="space-y-2">
                 {teams.map((t) => <TeamRosterRow key={t.id} team={t} onChanged={loadAll} />)}
                 {teams.length === 0 && <p className="text-center text-sm text-muted-foreground">No teams yet.</p>}
-              </div>
-
-              <div className="rounded-2xl border border-border bg-card p-4">
-                <p className="mb-3 flex items-center gap-1.5 text-sm font-bold"><Mail className="h-4 w-4" /> Email a team's summary</p>
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Sent from the platform's configured address — still subject to your Resend sending-domain
-                  setup, same as every other email in the app.
-                </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <select
-                    value={emailTeamId}
-                    onChange={(e) => setEmailTeamId(e.target.value)}
-                    className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                    data-testid="sa-email-team-select"
-                  >
-                    <option value="">Select team…</option>
-                    {teams.map((t) => <option key={t.id} value={t.id}>{t.team_name}</option>)}
-                  </select>
-                  <Input value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="recipient@example.com" className="flex-1" data-testid="sa-email-to" />
-                  <Button onClick={sendSummary} disabled={sendingEmail} data-testid="sa-email-send">
-                    {sendingEmail ? "Sending…" : "Send"}
-                  </Button>
-                </div>
               </div>
             </TabsContent>
           </Tabs>
