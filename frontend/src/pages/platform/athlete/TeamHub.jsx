@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, Users, Pencil } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -17,6 +18,7 @@ function todayStr() {
 
 export default function TeamHub() {
   const { team } = usePlatformAuth();
+  const { t } = useTranslation();
   const [checkins, setCheckins] = useState(null);
   const [editing, setEditing] = useState(null);
 
@@ -38,11 +40,11 @@ export default function TeamHub() {
     try {
       if (editing) {
         await apiV2.patch(`/checkin/team/${editing.id}`, payload);
-        toast.success("Check-in updated!");
+        toast.success("✓");
         setEditing(null);
       } else {
         await apiV2.post("/checkin/team", payload);
-        toast.success("Check-in logged!");
+        toast.success("✓");
       }
       await load();
     } catch (err) {
@@ -53,7 +55,6 @@ export default function TeamHub() {
   const handleDelete = async (id) => {
     try {
       await apiV2.delete(`/checkin/team/${id}`);
-      toast.success("Deleted");
       if (editing?.id === id) setEditing(null);
       await load();
     } catch (err) {
@@ -62,11 +63,11 @@ export default function TeamHub() {
   };
 
   return (
-    <AuthShell icon={Users} title={team?.team_name || "Team check-in"} exitConfirm maxWidth="max-w-xl">
+    <AuthShell icon={Users} title={team?.team_name || t("teamHub.checkInTab")} exitConfirm maxWidth="max-w-xl">
       <Tabs defaultValue="checkin">
         <TabsList className="mb-6 grid w-full grid-cols-2">
-          <TabsTrigger value="checkin" data-testid="team-tab-checkin">Check-in</TabsTrigger>
-          <TabsTrigger value="stats" data-testid="team-tab-stats">My stats</TabsTrigger>
+          <TabsTrigger value="checkin" data-testid="team-tab-checkin">{t("teamHub.checkInTab")}</TabsTrigger>
+          <TabsTrigger value="stats" data-testid="team-tab-stats">{t("teamHub.statsTab")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="checkin">
@@ -76,14 +77,14 @@ export default function TeamHub() {
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               </div>
             ) : editing ? (
-              <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel="Save changes" />
+              <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel={t("checkIn.saveChanges")} />
             ) : today ? (
               <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
                 <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-                <p className="font-bold">You're all set for today</p>
-                <p className="mt-1 text-sm text-muted-foreground">Your team's medical staff can see this check-in.</p>
+                <p className="font-bold">{t("teamHub.doneTitle")}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{t("teamHub.doneSubtitle")}</p>
                 <Button variant="outline" size="sm" className="mt-4 gap-1.5" onClick={() => setEditing(today)} data-testid="edit-today-checkin">
-                  <Pencil className="h-3.5 w-3.5" /> Edit today's entry
+                  <Pencil className="h-3.5 w-3.5" /> {t("individualCheckIn.editToday")}
                 </Button>
               </div>
             ) : (
@@ -91,7 +92,7 @@ export default function TeamHub() {
             )}
             <div>
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Your history</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
                 {checkins?.length > 0 && (
                   <ExportButtons pdfUrl="/checkin/team/export/pdf" filename="my-team-checkin-history" />
                 )}

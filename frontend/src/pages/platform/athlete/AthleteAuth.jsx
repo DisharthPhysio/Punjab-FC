@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -13,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function AthleteAuth() {
   const navigate = useNavigate();
   const { login } = usePlatformAuth();
+  const { t } = useTranslation();
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -40,42 +42,42 @@ export default function AthleteAuth() {
   };
 
   return (
-    <AuthShell icon={User} title="Individual athlete" subtitle="Use your personal email to continue" backTo="/athlete">
+    <AuthShell icon={User} title={t("athleteAuth.title")} subtitle={t("athleteAuth.subtitle")} backTo="/athlete">
       <Tabs value={mode} onValueChange={setMode} className="mb-6">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login" data-testid="athlete-tab-login">Log in</TabsTrigger>
-          <TabsTrigger value="signup" data-testid="athlete-tab-signup">Sign up</TabsTrigger>
+          <TabsTrigger value="login" data-testid="athlete-tab-login">{t("athleteAuth.login")}</TabsTrigger>
+          <TabsTrigger value="signup" data-testid="athlete-tab-signup">{t("athleteAuth.signup")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {mode === "signup" && (
           <div className="space-y-1.5">
-            <Label htmlFor="a-name">Full name</Label>
-            <Input id="a-name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" data-testid="athlete-name" />
+            <Label htmlFor="a-name">{t("athleteAuth.fullName")}</Label>
+            <Input id="a-name" required value={name} onChange={(e) => setName(e.target.value)} placeholder={t("athleteAuth.namePlaceholder")} data-testid="athlete-name" />
           </div>
         )}
         <div className="space-y-1.5">
-          <Label htmlFor="a-email">Email</Label>
+          <Label htmlFor="a-email">{t("athleteAuth.email")}</Label>
           <Input id="a-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" data-testid="athlete-email" />
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label htmlFor="a-pass">Password</Label>
+            <Label htmlFor="a-pass">{t("athleteAuth.password")}</Label>
             {mode === "login" && (
               <button
                 type="button"
                 onClick={() => navigate(`/forgot-password?role=athlete&email=${encodeURIComponent(email.trim().toLowerCase())}`)}
                 className="text-xs font-medium text-primary hover:underline"
               >
-                Forgot password?
+                {t("athleteAuth.forgotPassword")}
               </button>
             )}
           </div>
-          <Input id="a-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" data-testid="athlete-password" />
+          <Input id="a-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="athlete-password" />
         </div>
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="athlete-submit">
-          {submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
+          {submitting ? t("common.pleaseWait") : mode === "signup" ? t("athleteAuth.createAccount") : t("athleteAuth.login")}
         </Button>
       </form>
     </AuthShell>

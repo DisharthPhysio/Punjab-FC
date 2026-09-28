@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, ClipboardList, Pencil } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
@@ -13,6 +14,7 @@ function todayStr() {
 }
 
 export default function IndividualCheckIn() {
+  const { t } = useTranslation();
   const [checkins, setCheckins] = useState(null); // null = loading
   const [editing, setEditing] = useState(null); // checkin being edited, or null
 
@@ -34,11 +36,11 @@ export default function IndividualCheckIn() {
     try {
       if (editing) {
         await apiV2.patch(`/checkin/${editing.id}`, payload);
-        toast.success("Check-in updated!");
+        toast.success("✓");
         setEditing(null);
       } else {
         await apiV2.post("/checkin", payload);
-        toast.success("Check-in logged!");
+        toast.success("✓");
       }
       await load();
     } catch (err) {
@@ -49,7 +51,6 @@ export default function IndividualCheckIn() {
   const handleDelete = async (id) => {
     try {
       await apiV2.delete(`/checkin/${id}`);
-      toast.success("Deleted");
       if (editing?.id === id) setEditing(null);
       await load();
     } catch (err) {
@@ -58,21 +59,21 @@ export default function IndividualCheckIn() {
   };
 
   return (
-    <AuthShell icon={ClipboardList} title="Individual check-in" subtitle="Takes under a minute" exitConfirm maxWidth="max-w-xl">
+    <AuthShell icon={ClipboardList} title={t("individualCheckIn.title")} subtitle={t("individualCheckIn.subtitle")} exitConfirm maxWidth="max-w-xl">
       <div className="space-y-8">
         {checkins === null ? (
           <div className="grid place-items-center py-10">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : editing ? (
-          <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel="Save changes" />
+          <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel={t("checkIn.saveChanges")} />
         ) : today ? (
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
             <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-            <p className="font-bold">You're all set for today</p>
-            <p className="mt-1 text-sm text-muted-foreground">You can still edit today's entry if something changes.</p>
+            <p className="font-bold">{t("individualCheckIn.doneTitle")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("individualCheckIn.doneSubtitle")}</p>
             <Button variant="outline" size="sm" className="mt-4 gap-1.5" onClick={() => setEditing(today)} data-testid="edit-today-checkin">
-              <Pencil className="h-3.5 w-3.5" /> Edit today's entry
+              <Pencil className="h-3.5 w-3.5" /> {t("individualCheckIn.editToday")}
             </Button>
           </div>
         ) : (
@@ -81,7 +82,7 @@ export default function IndividualCheckIn() {
 
         <div>
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Your history</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
             {checkins?.length > 0 && (
               <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-checkin-history" />
             )}

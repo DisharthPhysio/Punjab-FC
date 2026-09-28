@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Users, Check } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 export default function JoinTeam() {
   const navigate = useNavigate();
   const { login } = usePlatformAuth();
+  const { t } = useTranslation();
   const [step, setStep] = useState("code"); // "code" | "name"
   const [code, setCode] = useState("");
   const [team, setTeam] = useState(null);
@@ -53,11 +55,11 @@ export default function JoinTeam() {
 
   if (step === "name") {
     return (
-      <AuthShell icon={Users} title={team?.team_name} subtitle="Which name on the roster is you?" backTo="/athlete/join-team">
+      <AuthShell icon={Users} title={team?.team_name} subtitle={t("joinTeam.whichName")} backTo="/athlete/join-team">
         <div className="space-y-2">
           {players.length === 0 && (
             <p className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
-              No unclaimed names left on this roster. Ask your team admin to add you or reset your name.
+              {t("joinTeam.noPlayers")}
             </p>
           )}
           {players.map((p) => {
@@ -69,7 +71,10 @@ export default function JoinTeam() {
                 data-testid={`roster-name-${p.name}`}
                 className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${active ? "border-primary bg-primary/10 text-primary" : "border-border bg-card hover:border-primary/40"}`}
               >
-                {p.name}
+                <span>
+                  {p.name}
+                  {p.joined && <span className="ml-2 text-xs font-normal text-muted-foreground">{t("joinTeam.alreadyJoined")}</span>}
+                </span>
                 {active && <Check className="h-4 w-4" />}
               </button>
             );
@@ -77,7 +82,7 @@ export default function JoinTeam() {
         </div>
         {players.length > 0 && (
           <Button className="mt-6 w-full" size="lg" onClick={confirmName} disabled={submitting || !selected} data-testid="confirm-name-submit">
-            {submitting ? "Confirming…" : "This is me"}
+            {submitting ? t("joinTeam.confirming") : t("joinTeam.thisIsMe")}
           </Button>
         )}
       </AuthShell>
@@ -85,11 +90,11 @@ export default function JoinTeam() {
   }
 
   return (
-    <AuthShell icon={Users} title="Join a team" subtitle="Enter the 6-digit code your team gave you" backTo="/athlete">
+    <AuthShell icon={Users} title={t("joinTeam.joinTitle")} subtitle={t("joinTeam.joinSubtitle")} backTo="/athlete">
       <div className="space-y-6">
         <CodeInput value={code} onChange={setCode} />
         <Button className="w-full" size="lg" onClick={lookup} disabled={submitting || code.length !== 6} data-testid="join-team-submit">
-          {submitting ? "Looking up…" : "Continue"}
+          {submitting ? t("joinTeam.lookingUp") : t("common.continue")}
         </Button>
       </div>
     </AuthShell>

@@ -1,17 +1,20 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 import { User, KeyRound, ChevronRight } from "lucide-react";
 import { AuthShell } from "@/components/platform/AuthShell";
 
-const OPTIONS = [
-  { key: "individual", title: "Individual athlete", desc: "Log in with your email to check in on your own.", icon: User, to: "/athlete/individual" },
-  { key: "team", title: "I have a team code", desc: "No account needed — enter your team's code and pick your name.", icon: KeyRound, to: "/athlete/join-team" },
-];
-
 export default function AthleteEntry() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+
+  const OPTIONS = [
+    { key: "individual", title: t("athleteEntry.individualTitle"), desc: t("athleteEntry.individualDesc"), icon: User, to: "/athlete/individual" },
+    { key: "team", title: t("athleteEntry.teamTitle"), desc: t("athleteEntry.teamDesc"), icon: KeyRound, to: "/athlete/join-team" },
+  ];
+
   return (
-    <AuthShell title="Athlete" subtitle="How would you like to check in?" backTo="/" maxWidth="max-w-lg">
+    <AuthShell title={t("athleteEntry.title")} subtitle={t("athleteEntry.subtitle")} backTo="/" maxWidth="max-w-lg">
       <div className="space-y-3">
         {OPTIONS.map((opt, i) => (
           <motion.button
