@@ -5,6 +5,7 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { ExportButtons } from "@/components/platform/ExportButtons";
+import { GpsImportPanel } from "@/components/platform/GpsImportPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,13 +20,17 @@ export default function GpsData() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    apiV2.get("/team/roster").then((res) => {
-      const joined = res.data.players.filter((p) => p.joined);
-      setPlayers(joined);
-      if (joined.length > 0) setPlayerId(joined[0].id);
-    }).catch((err) => toast.error(formatApiError(err?.response?.data?.detail)));
+  const loadRoster = useCallback(async () => {
+    try {
+      const res = await apiV2.get("/team/roster");
+      setPlayers(res.data.players);
+      setPlayerId((current) => current || res.data.players[0]?.id || "");
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    }
   }, []);
+
+  useEffect(() => { loadRoster(); }, [loadRoster]);
 
   const loadPlayerData = useCallback(async () => {
     if (!playerId) return;
@@ -44,6 +49,11 @@ export default function GpsData() {
   }, [playerId]);
 
   useEffect(() => { loadPlayerData(); }, [loadPlayerData]);
+
+  const afterImport = async () => {
+    await loadRoster();
+    await loadPlayerData();
+  };
 
   const addSession = async (e) => {
     e.preventDefault();
@@ -86,6 +96,10 @@ export default function GpsData() {
   return (
     <AuthShell icon={Satellite} title="GPS data" subtitle="Optional — external load from your tracking system, vs. internal (session-RPE) load" backTo="/team/home" maxWidth="max-w-2xl">
       <div className="space-y-6">
+        <GpsImportPanel players={players} onImported={afterImport} />
+
+        <div className="h-px bg-border" />
+
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</p>
           <Select value={playerId} onValueChange={setPlayerId}>
@@ -94,13 +108,13 @@ export default function GpsData() {
               {players.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          {players.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No joined players yet.</p>}
+          {players.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No players on the roster yet — add some, or import a GPS report above.</p>}
         </div>
 
         {playerId && (
           <>
             <form onSubmit={addSession} className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-3 text-sm font-bold">Add a session</p>
+              <p className="mb-3 text-sm font-bold">Add a session manually</p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <div>
                   <p className="mb-1 text-xs text-muted-foreground">Date</p>
@@ -134,19 +148,13 @@ export default function GpsData() {
 
             {analysis && (
               <div className="rounded-2xl border border-border bg-card p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-bold">External vs. internal load</p>
-                    <p className="text-xs text-muted-foreground">
-                      {analysis.matchedSamples >= 3 ? `${analysis.matchedSamples} matched days` : "Need a few more matched days for a correlation"}
-                    </p>
-                  </div>
-                  {analysis.correlation != null && (
-                    <p className="font-mono text-2xl font-extrabold">{analysis.correlation}</p>
-                  )}
-                </div>
+                <p className="mb-1 text-sm font-bold">External vs. internal load, and next-day readiness</p>
+                <p className="mb-4 text-xs text-muted-foreground">
+                  {analysis.matchedSamples >= 3 ? `${analysis.matchedSamples} matched days for distance` : "Need a few more matched days for a reliable correlation"}
+                </p>
+
                 {chartData.length > 0 && (
-                  <div className="h-64 w-full">
+                  <div className="mb-4 h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
@@ -158,6 +166,29 @@ export default function GpsData() {
                         <Line yAxisId="load" type="monotone" dataKey="internal" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls name="Internal load" />
                       </ComposedChart>
                     </ResponsiveContainer>
+                  </div>
+                )}
+
+                {analysis.correlations?.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="text-muted-foreground">
+                          <th className="pb-2 pr-2 font-semibold">External metric</th>
+                          <th className="pb-2 pr-2 font-semibold">vs. same-day load</th>
+                          <th className="pb-2 font-semibold">vs. next-day readiness</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analysis.correlations.map((c) => (
+                          <tr key={c.metric} className="border-t border-border">
+                            <td className="py-2 pr-2 font-medium">{c.label}</td>
+                            <td className="py-2 pr-2 font-mono">{c.vsInternalLoad != null ? `${c.vsInternalLoad} (n=${c.vsInternalLoadN})` : "—"}</td>
+                            <td className="py-2 font-mono">{c.vsNextDayReadiness != null ? `${c.vsNextDayReadiness} (n=${c.vsNextDayReadinessN})` : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
                 <p className="mt-3 text-xs text-muted-foreground">
@@ -181,7 +212,7 @@ export default function GpsData() {
                   <div key={s.id} className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5">
                     <div className="text-sm">
                       <span className="font-semibold">{new Date(s.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-                      <span className="ml-2 text-muted-foreground">{s.distance_m}m{s.hsr_distance_m ? ` · HSR ${s.hsr_distance_m}m` : ""}{s.sprints ? ` · ${s.sprints} sprints` : ""}</span>
+                      <span className="ml-2 text-muted-foreground">{s.distance_m}m{s.hsr_distance_m ? ` · HSR ${s.hsr_distance_m}m` : ""}{s.sprints ? ` · ${s.sprints} sprints` : ""}{s.source === "import" ? " · imported" : ""}</span>
                     </div>
                     <button onClick={() => removeSession(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label="Delete session">
                       <Trash2 className="h-3.5 w-3.5" />
