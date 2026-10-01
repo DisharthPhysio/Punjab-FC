@@ -94,7 +94,7 @@ export default function TeamHub() {
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
                 {checkins?.length > 0 && (
-                  <ExportButtons pdfUrl="/checkin/team/export/pdf" filename="my-team-checkin-history" />
+                  <ExportButtons pdfUrl="/checkin/team/export/pdf" filename="my-team-checkin-history" showDaysFilter />
                 )}
               </div>
               <CheckInHistory

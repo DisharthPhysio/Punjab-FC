@@ -84,7 +84,7 @@ export default function IndividualCheckIn() {
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
             {checkins?.length > 0 && (
-              <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-checkin-history" />
+              <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-checkin-history" showDaysFilter />
             )}
           </div>
           <CheckInHistory
