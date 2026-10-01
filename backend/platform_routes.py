@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 import export_utils
+import gps_import
 
 platform_router = APIRouter(prefix="/api/v2")
 
@@ -117,6 +118,19 @@ def code_expiry():
     return _now_utc() + timedelta(minutes=CODE_TTL_MINUTES)
 
 
+ALLOWED_EXPORT_WINDOWS = (7, 14, 30)
+
+
+def _since_filter(days: Optional[int]) -> dict:
+    """days=None exports full history (unchanged default); 7/14/30 narrow it."""
+    if not days:
+        return {}
+    if days not in ALLOWED_EXPORT_WINDOWS:
+        raise HTTPException(400, f"days must be one of {ALLOWED_EXPORT_WINDOWS}")
+    since = (datetime.strptime(_today_str(), "%Y-%m-%d") - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    return {"date": {"$gte": since}}
+
+
 def parse_day(date_str: str) -> str:
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
@@ -163,6 +177,19 @@ def week_stats(daily_loads: List[int]) -> dict:
     out["strain"] = int(round(total * mono_raw))
     out["monotonyRisk"] = "red" if mono >= MONOTONY_HIGH else ("amber" if mono >= MONOTONY_WATCH else "green")
     return out
+
+
+def pearson_r(xs: List[float], ys: List[float]) -> Optional[float]:
+    n = len(xs)
+    if n < 3:
+        return None
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
+    cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    var_x = sum((x - mean_x) ** 2 for x in xs)
+    var_y = sum((y - mean_y) ** 2 for y in ys)
+    if var_x <= 0 or var_y <= 0:
+        return None
+    return round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
 
 
 def change_pct(current, previous):
@@ -379,6 +406,13 @@ class GpsSessionPayload(BaseModel):
     hsr_distance_m: Optional[float] = None  # high-speed running distance
     sprints: Optional[int] = None
     max_speed_kmh: Optional[float] = None
+    accel_decel: Optional[float] = None       # accel + decel effort count
+    hml_distance_m: Optional[float] = None    # high metabolic load distance
+    duration_min: Optional[float] = None
+    m_per_min: Optional[float] = None         # metres per minute (relative distance)
+    position: Optional[str] = ""
+    source: Optional[str] = "manual"          # "manual" | "import"
+    session_label: Optional[str] = ""         # e.g. "Training 24-09-2026 (MD-3)"
     notes: Optional[str] = ""
 
 
@@ -672,6 +706,102 @@ async def delete_gps_session(session_id: str, team_id: Optional[str] = None, adm
     return {"message": "Deleted"}
 
 
+# ---- file upload: parse -> preview -> commit (items 2 & 4) ----
+@platform_router.post("/team/gps/upload")
+async def upload_gps_report(request: Request, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    """Parses a GPS report (PDF/CSV/XLSX) and matches each athlete row against
+    the roster by name. Nothing is saved here — this is a preview the coach
+    reviews and adjusts (confirm a match, or create a new roster player for a
+    name that isn't on it yet) before POSTing the result to /team/gps/commit.
+    A match is only proposed automatically when it's unambiguous; anything
+    uncertain is left for a human decision rather than silently guessed."""
+    team = await _admins_team(admin, team_id)
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None:
+        raise HTTPException(400, "Attach a file")
+    data = await upload.read()
+    try:
+        parsed = gps_import.parse_file(upload.filename, data)
+    except gps_import.ParseError as e:
+        raise HTTPException(400, str(e))
+
+    roster = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    results = gps_import.match_athletes(parsed["athletes"], roster)
+
+    rows = []
+    for row, res in zip(parsed["athletes"], results):
+        rows.append({"parsed": row, "match": res["match"], "suggestions": res["suggestions"]})
+    return {"session": parsed["session"], "format": parsed["format"], "unmapped_columns": parsed.get("unmapped_columns", []), "rows": rows}
+
+
+class GpsCommitRow(BaseModel):
+    parsed: dict
+    action: Literal["match", "create", "skip"]
+    player_id: Optional[str] = None  # required when action == "match"
+
+
+class GpsCommitPayload(BaseModel):
+    date: str
+    session_label: Optional[str] = ""
+    rows: List[GpsCommitRow]
+
+
+@platform_router.post("/team/gps/commit")
+async def commit_gps_report(payload: GpsCommitPayload, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    parse_day(payload.date)
+    roster = await _db.team_players.find({"team_id": team["id"]}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    by_key = {gps_import.match_key(p["name"]): p for p in roster}
+
+    created, saved, skipped = [], 0, 0
+    for row in payload.rows:
+        if row.action == "skip":
+            skipped += 1
+            continue
+        player_id, player_name = row.player_id, None
+        if row.action == "create":
+            key = gps_import.match_key(row.parsed.get("raw_name") or row.parsed.get("name", ""))
+            existing = by_key.get(key)  # safety net: don't duplicate a player the matcher missed
+            if existing:
+                player_id, player_name = existing["id"], existing["name"]
+            else:
+                name = row.parsed.get("name") or row.parsed.get("raw_name") or "Unnamed"
+                new_player = {"id": str(uuid.uuid4()), "team_id": team["id"], "name": name,
+                              "contact": "", "claimed_at": None, "created_at": _now_utc().isoformat()}
+                await _db.team_players.insert_one(dict(new_player))
+                by_key[gps_import.match_key(name)] = new_player
+                player_id, player_name = new_player["id"], name
+                created.append({"id": player_id, "name": name})
+        if not player_id:
+            raise HTTPException(400, "Each matched row needs a player_id")
+        if not player_name:
+            player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]})
+            if not player:
+                raise HTTPException(404, f"Player not found for row '{row.parsed.get('name')}'")
+            player_name = player["name"]
+
+        p = row.parsed
+        doc = {
+            "id": str(uuid.uuid4()), "team_id": team["id"], "team_player_id": player_id, "player_name": player_name,
+            "date": p.get("date") or payload.date,
+            "distance_m": p.get("distance_m"), "hsr_distance_m": p.get("hsr_distance_m"), "sprints": p.get("sprints"),
+            "max_speed_kmh": p.get("max_speed_kmh"), "accel_decel": p.get("accel_decel"),
+            "hml_distance_m": p.get("hml_distance_m"), "duration_min": p.get("duration_min"), "m_per_min": p.get("m_per_min"),
+            "position": p.get("position") or "", "source": "import",
+            "session_label": p.get("session") or payload.session_label or "", "notes": "",
+            "created_at": _now_utc().isoformat(),
+        }
+        await _db.gps_sessions.insert_one(dict(doc))
+        saved += 1
+
+    return {"createdPlayers": created, "savedSessions": saved, "skipped": skipped}
+
+
+# ---- analysis: correlate GPS (external load) against internal load & readiness (item 3) ----
+EXTERNAL_METRICS = [("distance_m", "Total distance"), ("hsr_distance_m", "High-speed distance"), ("accel_decel", "Accel + decel efforts")]
+
+
 @platform_router.get("/team/gps/analysis")
 async def gps_analysis(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
@@ -680,36 +810,44 @@ async def gps_analysis(player_id: str, team_id: Optional[str] = None, admin: dic
         raise HTTPException(404, "Player not found")
     gps_rows = await _db.gps_sessions.find({"team_id": team["id"], "team_player_id": player_id}, {"_id": 0}).to_list(200)
     checkin_rows = await _db.checkins_v2.find(
-        {"team_player_id": player_id, "context": "team", "load": {"$ne": None}}, {"_id": 0, "date": 1, "load": 1}
+        {"team_player_id": player_id, "context": "team"}, {"_id": 0}
     ).to_list(500)
-    internal_by_date = {c["date"]: c["load"] for c in checkin_rows}
+    by_date = {c["date"]: c for c in checkin_rows}
+
+    def next_day(d: str) -> str:
+        return (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
     paired = []
     for g in sorted(gps_rows, key=lambda x: x["date"]):
-        internal = internal_by_date.get(g["date"])
-        paired.append({**g, "internal_load": internal})
+        same_day = by_date.get(g["date"])
+        tomorrow = by_date.get(next_day(g["date"]))
+        paired.append({
+            **g, "internal_load": same_day.get("load") if same_day else None,
+            "readiness_next_day": readiness_score(tomorrow) if tomorrow else None,
+        })
+
+    correlations = []
+    for field, label in EXTERNAL_METRICS:
+        vs_load = [(p[field], p["internal_load"]) for p in paired if p.get(field) is not None and p.get("internal_load") is not None]
+        vs_readiness = [(p[field], p["readiness_next_day"]) for p in paired if p.get(field) is not None and p.get("readiness_next_day") is not None]
+        correlations.append({
+            "metric": field, "label": label,
+            "vsInternalLoad": pearson_r([x for x, _ in vs_load], [y for _, y in vs_load]), "vsInternalLoadN": len(vs_load),
+            "vsNextDayReadiness": pearson_r([x for x, _ in vs_readiness], [y for _, y in vs_readiness]), "vsNextDayReadinessN": len(vs_readiness),
+        })
 
     matched = [p for p in paired if p.get("distance_m") is not None and p.get("internal_load") is not None]
-    correlation = None
-    if len(matched) >= 3:
-        xs = [p["distance_m"] for p in matched]
-        ys = [p["internal_load"] for p in matched]
-        n = len(matched)
-        mean_x, mean_y = sum(xs) / n, sum(ys) / n
-        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-        var_x = sum((x - mean_x) ** 2 for x in xs)
-        var_y = sum((y - mean_y) ** 2 for y in ys)
-        if var_x > 0 and var_y > 0:
-            correlation = round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
-
-    return {"player_name": player["name"], "sessions": paired, "correlation": correlation, "matchedSamples": len(matched)}
+    return {
+        "player_name": player["name"], "sessions": paired, "correlations": correlations,
+        "correlation": correlations[0]["vsInternalLoad"], "matchedSamples": len(matched),  # kept for older callers
+    }
 
 
 @platform_router.get("/team/gps/export/pdf")
 async def export_gps_pdf(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
     analysis = await gps_analysis(player_id=player_id, team_id=team["id"], admin=admin)
-    pdf = export_utils.generate_gps_pdf(team["team_name"], analysis["player_name"], analysis["sessions"], analysis["correlation"])
+    pdf = export_utils.generate_gps_pdf(team["team_name"], analysis["player_name"], analysis["sessions"], analysis["correlations"])
     return Response(content=pdf, media_type="application/pdf",
                      headers={"Content-Disposition": f'attachment; filename="{analysis["player_name"]}-gps.pdf"'})
 
@@ -764,11 +902,11 @@ async def delete_individual_checkin(checkin_id: str, athlete: dict = Depends(get
 
 
 @platform_router.get("/checkin/export/pdf")
-async def export_individual_pdf(athlete: dict = Depends(get_current_athlete)):
-    rows = await _db.checkins_v2.find(
-        {"athlete_id": athlete["id"], "context": "individual"}, {"_id": 0}
-    ).sort("date", -1).to_list(500)
-    pdf = export_utils.generate_history_pdf(athlete["name"], "Individual check-in history", rows)
+async def export_individual_pdf(days: Optional[int] = None, athlete: dict = Depends(get_current_athlete)):
+    query = {"athlete_id": athlete["id"], "context": "individual", **_since_filter(days)}
+    rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
+    label = f"Individual check-in history — last {days} days" if days else "Individual check-in history"
+    pdf = export_utils.generate_history_pdf(athlete["name"], label, rows)
     return Response(content=pdf, media_type="application/pdf",
                      headers={"Content-Disposition": f'attachment; filename="{athlete["name"]}-checkins.pdf"'})
 
@@ -823,11 +961,11 @@ async def delete_team_checkin(checkin_id: str, player: dict = Depends(get_curren
 
 
 @platform_router.get("/checkin/team/export/pdf")
-async def export_team_athlete_pdf(player: dict = Depends(get_current_team_athlete)):
-    rows = await _db.checkins_v2.find(
-        {"team_player_id": player["id"], "context": "team"}, {"_id": 0}
-    ).sort("date", -1).to_list(500)
-    pdf = export_utils.generate_history_pdf(player["name"], "Team check-in history", rows)
+async def export_team_athlete_pdf(days: Optional[int] = None, player: dict = Depends(get_current_team_athlete)):
+    query = {"team_player_id": player["id"], "context": "team", **_since_filter(days)}
+    rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
+    label = f"Team check-in history — last {days} days" if days else "Team check-in history"
+    pdf = export_utils.generate_history_pdf(player["name"], label, rows)
     return Response(content=pdf, media_type="application/pdf",
                      headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
 
@@ -937,16 +1075,7 @@ async def team_sleep_correlation(team_id: Optional[str] = None, admin: dict = De
     points = [r for r in rows if r.get("sleepHours") is not None and r.get("sleepQuality")]
 
     n = len(points)
-    correlation = None
-    if n >= 3:
-        xs = [p["sleepHours"] for p in points]
-        ys = [p["sleepQuality"] for p in points]
-        mean_x, mean_y = sum(xs) / n, sum(ys) / n
-        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-        var_x = sum((x - mean_x) ** 2 for x in xs)
-        var_y = sum((y - mean_y) ** 2 for y in ys)
-        if var_x > 0 and var_y > 0:
-            correlation = round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
+    correlation = pearson_r([p["sleepHours"] for p in points], [p["sleepQuality"] for p in points])
 
     buckets = {}
     for p in points:
@@ -1039,15 +1168,15 @@ async def team_player_detail(player_id: str, team_id: Optional[str] = None, admi
 
 
 @platform_router.get("/team/player/{player_id}/export/pdf")
-async def export_player_pdf(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+async def export_player_pdf(player_id: str, days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
     player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0})
     if not player:
         raise HTTPException(404, "Player not found")
-    checkins = await _db.checkins_v2.find(
-        {"team_player_id": player_id, "context": "team"}, {"_id": 0}
-    ).sort("date", -1).to_list(500)
-    pdf = export_utils.generate_history_pdf(player["name"], f"{team['team_name']} — check-in history", checkins)
+    query = {"team_player_id": player_id, "context": "team", **_since_filter(days)}
+    checkins = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
+    label = f"{team['team_name']} — check-in history — last {days} days" if days else f"{team['team_name']} — check-in history"
+    pdf = export_utils.generate_history_pdf(player["name"], label, checkins)
     return Response(content=pdf, media_type="application/pdf",
                      headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
 

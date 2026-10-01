@@ -375,7 +375,7 @@ def generate_history_pdf(person_name: str, context_label: str, checkins: List[di
 
 
 # ---------------------------------------------------------------- GPS analysis PDF (optional feature)
-def generate_gps_pdf(team_name: str, player_name: str, sessions: List[dict], correlation: Optional[float]) -> bytes:
+def generate_gps_pdf(team_name: str, player_name: str, sessions: List[dict], correlations: Optional[List[dict]] = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=16 * mm, leftMargin=16 * mm, rightMargin=16 * mm)
     styles = _styles()
@@ -383,9 +383,10 @@ def generate_gps_pdf(team_name: str, player_name: str, sessions: List[dict], cor
     generated = datetime.now().strftime("%d %b %Y, %H:%M")
     _header(story, styles, f"{player_name} — GPS load analysis", f"{team_name} · generated {generated}")
 
+    lead_r = correlations[0]["vsInternalLoad"] if correlations else None
     story.append(_stat_cards([
         ("Sessions logged", len(sessions), None),
-        ("Distance ↔ internal load", correlation if correlation is not None else "—", BRAND_HEX),
+        ("Distance ↔ internal load", lead_r if lead_r is not None else "—", BRAND_HEX),
     ]))
     story.append(Spacer(1, 12))
 
@@ -394,6 +395,18 @@ def generate_gps_pdf(team_name: str, player_name: str, sessions: List[dict], cor
         story.append(Paragraph("Distance vs. internal (session-RPE) load", styles["PfcSection"]))
         story.append(_img_flowable(chart, height_mm=44))
         story.append(Spacer(1, 6))
+
+    if correlations:
+        story.append(Paragraph("External vs. internal load — correlation", styles["PfcSection"]))
+        corr_rows = [["External metric", "vs. same-day internal load", "vs. next-day readiness"]]
+        for c in correlations:
+            corr_rows.append([
+                c["label"],
+                f'{c["vsInternalLoad"]} (n={c["vsInternalLoadN"]})' if c["vsInternalLoad"] is not None else "—",
+                f'{c["vsNextDayReadiness"]} (n={c["vsNextDayReadinessN"]})' if c["vsNextDayReadiness"] is not None else "—",
+            ])
+        story.append(_table(corr_rows, col_widths=[50 * mm, 60 * mm, 60 * mm]))
+        story.append(Spacer(1, 8))
 
     story.append(Paragraph("Session detail", styles["PfcSection"]))
     header_row = ["Date", "Distance (m)", "HSR distance (m)", "Sprints", "Max speed (km/h)", "Internal load"]
