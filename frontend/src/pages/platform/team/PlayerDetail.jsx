@@ -166,7 +166,7 @@ export default function PlayerDetail() {
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Recent check-ins</h3>
                 {checkins?.length > 0 && (
-                  <ExportButtons pdfUrl={`/team/player/${playerId}/export/pdf`} filename={`${player.name}-checkins`} canShare={false} />
+                  <ExportButtons pdfUrl={`/team/player/${playerId}/export/pdf`} filename={`${player.name}-checkins`} canShare={false} showDaysFilter />
                 )}
               </div>
               <CheckInHistory checkins={checkins} emptyLabel="No check-ins logged yet." onDelete={deleteCheckin} />
