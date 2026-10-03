@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useRef } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -82,6 +82,10 @@ export default function Landing() {
             </motion.button>
           ))}
         </div>
+
+        <Link to="/privacy" className="mt-10 text-xs text-muted-foreground hover:text-primary" data-testid="landing-privacy-link">
+          Privacy Policy
+        </Link>
       </div>
     </div>
   );
