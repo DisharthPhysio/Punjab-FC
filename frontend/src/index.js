@@ -22,3 +22,11 @@ root.render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Required for the app to count as "installable" (the Play Store wrapper needs this).
+// Registration failing (e.g. in an unsupported browser) should never break the app itself.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

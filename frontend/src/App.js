@@ -29,6 +29,7 @@ import GpsData from "@/pages/platform/team/GpsData";
 import TeamCalendar from "@/pages/platform/team/TeamCalendar";
 import SuperAdminLogin from "@/pages/platform/superadmin/SuperAdminLogin";
 import SuperAdminPanel from "@/pages/platform/superadmin/SuperAdminPanel";
+import Privacy from "@/pages/Privacy";
 
 function Spinner() {
   return (
@@ -100,6 +101,8 @@ function App() {
               <Route path="/superadmin/panel" element={<SuperAdminPanel />} />
 
               {/* ---- legacy single-team flow, kept alive during the transition ---- */}
+              <Route path="/privacy" element={<Privacy />} />
+
               <Route path="/legacy" element={<CheckIn />} />
               <Route path="/legacy/coach" element={<CoachLogin />} />
               <Route
