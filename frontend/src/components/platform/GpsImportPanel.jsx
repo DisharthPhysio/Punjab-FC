@@ -1,7 +1,9 @@
 import { useState, useRef } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { UploadCloud, FileCheck2, UserPlus, X, CheckCircle2 } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
+import { localDateStr } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -15,6 +17,7 @@ function decisionFor(row) {
 /** onImported() is called after a successful commit so the parent can refresh
  * its roster/player list (a file import can add brand-new players). */
 export function GpsImportPanel({ players, onImported }) {
+  const { t } = useTranslation();
   const fileInput = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null); // { session, format, unmapped_columns, rows }
@@ -39,7 +42,7 @@ export function GpsImportPanel({ players, onImported }) {
       res.data.rows.forEach((row, i) => { initial[i] = decisionFor(row); });
       setDecisions(initial);
     } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail) || "Couldn't read that file");
+      toast.error(formatApiError(err?.response?.data?.detail) || t("gpsImport.couldntRead"));
     } finally {
       setUploading(false);
     }
@@ -56,12 +59,12 @@ export function GpsImportPanel({ players, onImported }) {
           return { parsed: row.parsed, action: "match", player_id: d };
         });
       const res = await apiV2.post("/team/gps/commit", {
-        date: preview.session.date || new Date().toISOString().slice(0, 10),
+        date: preview.session.date || localDateStr(),
         session_label: preview.session.name || "",
         rows,
       });
       setResult(res.data);
-      toast.success(`Saved ${res.data.savedSessions} session${res.data.savedSessions === 1 ? "" : "s"}`);
+      toast.success(t("gpsImport.saved", { count: res.data.savedSessions }));
       setPreview(null);
       onImported?.();
     } catch (err) {
@@ -76,15 +79,15 @@ export function GpsImportPanel({ players, onImported }) {
       <div className="rounded-2xl border border-dashed border-border bg-card p-5 text-center">
         <input ref={fileInput} type="file" accept=".pdf,.csv,.xlsx" className="hidden" onChange={handleFile} data-testid="gps-import-file-input" />
         <UploadCloud className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
-        <p className="mb-1 text-sm font-bold">Import a team GPS report</p>
-        <p className="mb-3 text-xs text-muted-foreground">PDF activity report, or a CSV/Excel export — matched to your roster by name.</p>
+        <p className="mb-1 text-sm font-bold">{t("gpsImport.title")}</p>
+        <p className="mb-3 text-xs text-muted-foreground">{t("gpsImport.desc")}</p>
         <Button size="sm" onClick={pickFile} disabled={uploading} data-testid="gps-import-pick-file">
-          {uploading ? "Reading…" : "Choose file"}
+          {uploading ? t("gpsImport.reading") : t("gpsImport.chooseFile")}
         </Button>
         {result && (
           <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            {result.savedSessions} session(s) saved{result.createdPlayers.length > 0 ? `, ${result.createdPlayers.length} player(s) added` : ""}.
+            {t("gpsImport.resultSaved", { count: result.savedSessions })}{result.createdPlayers.length > 0 ? `, ${t("gpsImport.resultAdded", { count: result.createdPlayers.length })}` : ""}.
           </p>
         )}
       </div>
@@ -97,20 +100,20 @@ export function GpsImportPanel({ players, onImported }) {
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <p className="flex items-center gap-1.5 text-sm font-bold"><FileCheck2 className="h-4 w-4" /> {preview.session.name || "Imported session"}</p>
+          <p className="flex items-center gap-1.5 text-sm font-bold"><FileCheck2 className="h-4 w-4" /> {preview.session.name || t("gpsImport.importedSession")}</p>
           <p className="text-xs text-muted-foreground">
-            {preview.session.date || "no date found"} · {preview.rows.length} athletes
-            {unmatchedCount > 0 && ` · ${unmatchedCount} will be added as new players`}
+            {preview.session.date || t("gpsImport.noDate")} · {t("gpsImport.athletes", { count: preview.rows.length })}
+            {unmatchedCount > 0 && ` · ${t("gpsImport.willBeAdded", { count: unmatchedCount })}`}
           </p>
         </div>
-        <button onClick={() => setPreview(null)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" aria-label="Cancel import">
+        <button onClick={() => setPreview(null)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" aria-label={t("gpsImport.cancel")}>
           <X className="h-4 w-4" />
         </button>
       </div>
 
       {preview.unmapped_columns?.length > 0 && (
         <p className="mb-3 rounded-lg bg-secondary/60 px-3 py-2 text-xs text-muted-foreground">
-          Not used (unrecognised columns): {preview.unmapped_columns.join(", ")}
+          {t("gpsImport.unmapped", { columns: preview.unmapped_columns.join(", ") })}
         </p>
       )}
 
@@ -124,9 +127,9 @@ export function GpsImportPanel({ players, onImported }) {
                 <p className="truncate text-sm font-semibold">{row.parsed.name}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {row.parsed.distance_m != null ? `${row.parsed.distance_m}m` : "—"}
-                  {row.parsed.hsr_distance_m != null ? ` · HSR ${row.parsed.hsr_distance_m}m` : ""}
-                  {row.parsed.sprints != null ? ` · ${row.parsed.sprints} sprints` : ""}
-                  {!confident && row.match && <span className="text-amber-600 dark:text-amber-400"> · check this match</span>}
+                  {row.parsed.hsr_distance_m != null ? ` · ${t("gps.hsrShort")} ${row.parsed.hsr_distance_m}m` : ""}
+                  {row.parsed.sprints != null ? ` · ${t("gps.sprintsCount", { count: row.parsed.sprints })}` : ""}
+                  {!confident && row.match && <span className="text-amber-600 dark:text-amber-400"> · {t("gpsImport.checkMatch")}</span>}
                 </p>
               </div>
               <Select value={d} onValueChange={(v) => setDecisions((old) => ({ ...old, [i]: v }))}>
@@ -134,11 +137,11 @@ export function GpsImportPanel({ players, onImported }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={CREATE}><span className="inline-flex items-center gap-1.5"><UserPlus className="h-3.5 w-3.5" /> Add as new player</span></SelectItem>
-                  <SelectItem value={SKIP}>Skip this row</SelectItem>
+                  <SelectItem value={CREATE}><span className="inline-flex items-center gap-1.5"><UserPlus className="h-3.5 w-3.5" /> {t("gpsImport.addAsNew")}</span></SelectItem>
+                  <SelectItem value={SKIP}>{t("gpsImport.skipRow")}</SelectItem>
                   {players.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      Match to {p.name}{row.suggestions?.find((s) => s.player_id === p.id) ? ` (${Math.round(row.suggestions.find((s) => s.player_id === p.id).score * 100)}%)` : ""}
+                      {t("gpsImport.matchTo", { name: p.name })}{row.suggestions?.find((s) => s.player_id === p.id) ? ` (${Math.round(row.suggestions.find((s) => s.player_id === p.id).score * 100)}%)` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -149,7 +152,7 @@ export function GpsImportPanel({ players, onImported }) {
       </div>
 
       <Button className="mt-4 w-full" onClick={commit} disabled={committing} data-testid="gps-import-commit">
-        {committing ? "Saving…" : `Confirm & save ${preview.rows.length} athlete(s)`}
+        {committing ? t("player.saving") : t("gpsImport.confirm", { count: preview.rows.length })}
       </Button>
     </div>
   );

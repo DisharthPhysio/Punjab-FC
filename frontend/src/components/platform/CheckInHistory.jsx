@@ -36,7 +36,7 @@ export function CheckInHistory({ checkins, emptyLabel, onEdit, onDelete }) {
                 </span>
               )}
               {onEdit && (
-                <button onClick={() => onEdit(c)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" aria-label="Edit" data-testid={`edit-checkin-${c.date}`}>
+                <button onClick={() => onEdit(c)} className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground" aria-label={t("history.edit")} data-testid={`edit-checkin-${c.date}`}>
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
               )}

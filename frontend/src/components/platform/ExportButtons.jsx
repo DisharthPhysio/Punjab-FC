@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Download, Share2, FileSpreadsheet } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ function triggerDownload(blob, filename) {
  * falls back to a plain download everywhere else. showDaysFilter adds a
  * 7/14/30-day (or all-time) window picker for history exports (item 1). */
 export function ExportButtons({ pdfUrl, excelUrl, filename, canShare = true, showDaysFilter = false }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(null); // "pdf" | "excel" | "share" | null
   const [days, setDays] = useState("all");
   const params = showDaysFilter && days !== "all" ? { days } : undefined;
@@ -41,7 +43,7 @@ export function ExportButtons({ pdfUrl, excelUrl, filename, canShare = true, sho
       const blob = await fetchBlob(url, kind === "pdf" ? params : undefined);
       triggerDownload(blob, kind === "excel" ? `${filename}.xlsx` : `${filename}${suffix}.pdf`);
     } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail) || "Couldn't generate the file");
+      toast.error(formatApiError(err?.response?.data?.detail) || t("export.couldntGenerate"));
     } finally {
       setBusy(null);
     }
@@ -58,7 +60,7 @@ export function ExportButtons({ pdfUrl, excelUrl, filename, canShare = true, sho
         triggerDownload(blob, `${filename}${suffix}.pdf`);
       }
     } catch (err) {
-      if (err?.name !== "AbortError") toast.error(formatApiError(err?.response?.data?.detail) || "Couldn't share the file");
+      if (err?.name !== "AbortError") toast.error(formatApiError(err?.response?.data?.detail) || t("export.couldntShare"));
     } finally {
       setBusy(null);
     }
@@ -72,25 +74,25 @@ export function ExportButtons({ pdfUrl, excelUrl, filename, canShare = true, sho
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="7">7 days</SelectItem>
-            <SelectItem value="14">14 days</SelectItem>
-            <SelectItem value="30">30 days</SelectItem>
+            <SelectItem value="all">{t("export.allTime")}</SelectItem>
+            <SelectItem value="7">{t("export.days", { count: 7 })}</SelectItem>
+            <SelectItem value="14">{t("export.days", { count: 14 })}</SelectItem>
+            <SelectItem value="30">{t("export.days", { count: 30 })}</SelectItem>
           </SelectContent>
         </Select>
       )}
       {canUseWebShare ? (
         <Button variant="outline" size="sm" onClick={share} disabled={!!busy} className="gap-1.5" data-testid="share-pdf-button">
-          <Share2 className="h-3.5 w-3.5" /> {busy === "share" ? "Preparing…" : "Share PDF"}
+          <Share2 className="h-3.5 w-3.5" /> {busy === "share" ? t("export.preparing") : t("export.sharePdf")}
         </Button>
       ) : (
         <Button variant="outline" size="sm" onClick={() => download("pdf")} disabled={!!busy} className="gap-1.5" data-testid="download-pdf-button">
-          <Download className="h-3.5 w-3.5" /> {busy === "pdf" ? "Preparing…" : "Download PDF"}
+          <Download className="h-3.5 w-3.5" /> {busy === "pdf" ? t("export.preparing") : t("export.downloadPdf")}
         </Button>
       )}
       {excelUrl && (
         <Button variant="outline" size="sm" onClick={() => download("excel")} disabled={!!busy} className="gap-1.5" data-testid="download-excel-button">
-          <FileSpreadsheet className="h-3.5 w-3.5" /> {busy === "excel" ? "Preparing…" : "Download Excel"}
+          <FileSpreadsheet className="h-3.5 w-3.5" /> {busy === "excel" ? t("export.preparing") : t("export.downloadExcel")}
         </Button>
       )}
     </div>
