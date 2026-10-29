@@ -25,6 +25,7 @@ Password reset (forgot-password) still uses an emailed code — that is a
 different, still-justified security control (proving you own the email
 before changing a password), independent of the removed signup verification.
 """
+import logging
 import os
 import re
 import secrets
@@ -36,9 +37,12 @@ from typing import List, Literal, Optional
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 
 import export_utils
 import gps_import
+
+logger = logging.getLogger(__name__)
 
 platform_router = APIRouter(prefix="/api/v2")
 
@@ -53,6 +57,10 @@ _now_utc = None
 _today_str = None
 
 CODE_TTL_MINUTES = 15
+# Max team-athlete logins (code + pick-your-name) per team per day. Individual athletes are NOT limited.
+TEAM_DAILY_LOGIN_LIMIT = int(os.environ.get("TEAM_DAILY_LOGIN_LIMIT", "150"))
+# One account may own several teams; this just keeps the lists the app loads (to_list(50)) complete.
+MAX_TEAMS_PER_ADMIN = 50
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SUPER_ADMIN_EMAIL_DEFAULT = "disharthjain98@gmail.com"
 SUPER_ADMIN_PASSWORD_DEFAULT = "Disharth10@"
@@ -70,8 +78,32 @@ def init(db, send_email, hash_password, verify_password, jwt_secret, jwt_algorit
     _today_str = today_str
 
 
+CHECKIN_UNIQUE_KEYS = ("athlete_id", "team_player_id", "context", "date")
+
+
+async def _drop_stale_checkin_indexes():
+    """Self-heal old databases. create_index() never removes an index that an earlier version of
+    the app created, so a leftover UNIQUE index such as (athlete_id, context, date) survives every
+    deploy. Team check-ins have no athlete_id (it is null), so with that old index the SECOND
+    player of a team to check in on a given day collides with the first and gets rejected.
+    The only unique index this collection should have is the one created below."""
+    try:
+        info = await _db.checkins_v2.index_information()
+    except Exception as e:  # collection does not exist yet
+        logger.info("checkins_v2 index check skipped: %s", e)
+        return
+    for name, spec in info.items():
+        if name == "_id_" or not spec.get("unique"):
+            continue
+        keys = tuple(k for k, _ in spec.get("key", []))
+        if keys != CHECKIN_UNIQUE_KEYS:
+            logger.warning("Dropping stale unique index %r %s on checkins_v2", name, list(keys))
+            await _db.checkins_v2.drop_index(name)
+
+
 async def ensure_indexes():
     """Called once from server.py's startup event."""
+    await _drop_stale_checkin_indexes()
     await _db.athletes.create_index("email", unique=True)
     await _db.admins.create_index("email", unique=True)
     await _db.superadmins.create_index("email", unique=True)
@@ -81,6 +113,7 @@ async def ensure_indexes():
     await _db.checkins_v2.create_index(
         [("athlete_id", 1), ("team_player_id", 1), ("context", 1), ("date", 1)], unique=True
     )
+    await _db.team_logins.create_index("expire_at", expireAfterSeconds=0)   # daily login counters clean themselves up
     await _db.gps_sessions.create_index([("team_id", 1), ("team_player_id", 1), ("date", 1)])
     await _db.player_notes.create_index([("team_id", 1), ("team_player_id", 1), ("created_at", -1)])
     # Seed the hidden super admin account (env vars override the defaults given at build time).
@@ -496,6 +529,26 @@ async def team_join(payload: TeamCodePayload):
     return {"team": {"id": team["id"], "team_name": team["team_name"]}, "available_players": players}
 
 
+TEAM_LOGIN_LIMIT_MSG = "This team has reached today's login limit. Please try again tomorrow."
+
+
+async def _claim_team_login_slot(team_id: str):
+    """Counts one team-athlete login against the team's daily cap, atomically (safe when many
+    players log in at the same moment). The first login of the day creates the counter; once it
+    reaches the cap the filter stops matching, the upsert tries to insert the same _id, and the
+    resulting DuplicateKeyError is our 'limit reached' signal. Resets daily (server TIMEZONE)."""
+    day = _today_str()
+    try:
+        await _db.team_logins.find_one_and_update(
+            {"_id": f"{team_id}:{day}", "count": {"$lt": TEAM_DAILY_LOGIN_LIMIT}},
+            {"$inc": {"count": 1},
+             "$setOnInsert": {"team_id": team_id, "date": day, "expire_at": _now_utc() + timedelta(days=3)}},
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        raise HTTPException(429, TEAM_LOGIN_LIMIT_MSG)
+
+
 @platform_router.post("/team/select")
 async def team_select(payload: SelectPlayerPayload):
     """Always succeeds for a valid roster name -- whether this is the first
@@ -509,6 +562,7 @@ async def team_select(payload: SelectPlayerPayload):
     player = await _db.team_players.find_one({"id": payload.player_id, "team_id": team["id"]})
     if not player:
         raise HTTPException(404, "Player not found on this team's roster")
+    await _claim_team_login_slot(team["id"])
     if not player.get("claimed_at"):
         await _db.team_players.update_one({"id": player["id"]}, {"$set": {"claimed_at": _now_utc().isoformat()}})
     token = make_token(player["id"], "team_athlete", days=365, team_id=team["id"])
@@ -522,33 +576,75 @@ async def team_mine(player: dict = Depends(get_current_team_athlete)):
 
 
 # ================= Team registration & Admin auth (no verification step) =================
+async def _create_team_for_admin(admin_id: str, team_name: str) -> dict:
+    """Creates a team (with its own athlete + admin codes) and links it to the admin."""
+    team_id = str(uuid.uuid4())
+    athlete_code = await unique_team_code("athlete_code")
+    admin_code = await unique_team_code("admin_code")
+    await _db.teams.insert_one({
+        "id": team_id, "team_name": team_name.strip(), "owner_admin_id": admin_id,
+        "athlete_code": athlete_code, "admin_code": admin_code, "created_at": _now_utc().isoformat(),
+    })
+    await _db.admins.update_one({"id": admin_id}, {"$addToSet": {"team_ids": team_id}})
+    return await _db.teams.find_one({"id": team_id}, {"_id": 0})
+
+
+async def _check_can_add_team(admin: dict, team_name: str):
+    if not team_name.strip():
+        raise HTTPException(400, "Enter a team name")
+    ids = admin.get("team_ids") or []
+    if len(ids) >= MAX_TEAMS_PER_ADMIN:
+        raise HTTPException(400, f"One account can have up to {MAX_TEAMS_PER_ADMIN} teams.")
+    mine = await _db.teams.find({"id": {"$in": ids}}, {"_id": 0, "team_name": 1}).to_list(MAX_TEAMS_PER_ADMIN)
+    if any(norm_name(t["team_name"]) == norm_name(team_name) for t in mine):
+        raise HTTPException(409, "You already have a team with that name.")
+
+
+def norm_name(n: str) -> str:
+    return " ".join((n or "").split()).casefold()
+
+
 @platform_router.post("/team/register")
 async def team_register(payload: TeamRegisterPayload):
+    """First-time registration creates the admin account + its first team. If this email already
+    has an account and the password is right, the same call simply adds ANOTHER team to it."""
     email = norm_email(payload.email)
     if not valid_email(email):
         raise HTTPException(400, "Enter a valid email address")
     if not payload.team_name.strip():
         raise HTTPException(400, "Enter a team name")
     _password_ok(payload.password)
-    if await _db.admins.find_one({"email": email}):
-        raise HTTPException(409, "An account with this email already exists. Try Admin Access instead.")
+
+    existing = await _db.admins.find_one({"email": email})
+    if existing:
+        if not _verify_password(payload.password, existing["password_hash"]):
+            raise HTTPException(409, "An account with this email already exists. Try Admin Access instead.")
+        await _check_can_add_team(existing, payload.team_name)
+        team = await _create_team_for_admin(existing["id"], payload.team_name)
+        token = make_token(existing["id"], "admin")
+        return {"token": token, "admin": {"id": existing["id"], "email": email}, "team": team}
 
     admin_id = str(uuid.uuid4())
-    team_id = str(uuid.uuid4())
-    athlete_code = await unique_team_code("athlete_code")
-    admin_code = await unique_team_code("admin_code")
     await _db.admins.insert_one({
         "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
         "reset_code": None, "reset_code_expires": None,
-        "team_ids": [team_id], "created_at": _now_utc().isoformat(),
+        "team_ids": [], "created_at": _now_utc().isoformat(),
     })
-    await _db.teams.insert_one({
-        "id": team_id, "team_name": payload.team_name.strip(), "owner_admin_id": admin_id,
-        "athlete_code": athlete_code, "admin_code": admin_code, "created_at": _now_utc().isoformat(),
-    })
+    team = await _create_team_for_admin(admin_id, payload.team_name)
     token = make_token(admin_id, "admin")
-    team = await _db.teams.find_one({"id": team_id}, {"_id": 0})
     return {"token": token, "admin": {"id": admin_id, "email": email}, "team": team}
+
+
+class NewTeamPayload(BaseModel):
+    team_name: str
+
+
+@platform_router.post("/admin/teams")
+async def admin_create_team(payload: NewTeamPayload, admin: dict = Depends(get_current_admin)):
+    """A logged-in admin adds another team to their account (each team gets its own codes + roster)."""
+    await _check_can_add_team(admin, payload.team_name)
+    team = await _create_team_for_admin(admin["id"], payload.team_name)
+    return {"team": team}
 
 
 @platform_router.post("/admin/signup")
@@ -853,6 +949,19 @@ async def export_gps_pdf(player_id: str, team_id: Optional[str] = None, admin: d
 
 
 # ================= Check-ins: individual (Athlete) =================
+async def _insert_checkin(doc: dict):
+    """Only a genuine duplicate means 'already submitted'. Anything else used to be reported with
+    the same message, which hid the real problem (a stale unique index rejecting other players)."""
+    try:
+        await _db.checkins_v2.insert_one(dict(doc))
+    except DuplicateKeyError as e:
+        logger.warning("Check-in insert rejected as duplicate (%s): %s", doc.get("context"), e.details or e)
+        raise HTTPException(409, "You've already submitted a check-in for today.")
+    except Exception:
+        logger.exception("Check-in insert failed")
+        raise HTTPException(500, "Could not save your check-in. Please try again.")
+
+
 @platform_router.post("/checkin")
 async def submit_individual_checkin(payload: CheckInPayload, athlete: dict = Depends(get_current_athlete)):
     _validate_checkin(payload)
@@ -863,10 +972,7 @@ async def submit_individual_checkin(payload: CheckInPayload, athlete: dict = Dep
     doc.update({"id": str(uuid.uuid4()), "context": "individual", "athlete_id": athlete["id"],
                 "athlete_name": athlete["name"], "date": today, "load": _load_from_payload(payload),
                 "created_at": _now_utc().isoformat()})
-    try:
-        await _db.checkins_v2.insert_one(dict(doc))
-    except Exception:
-        raise HTTPException(409, "You've already submitted a check-in for today.")
+    await _insert_checkin(doc)
     doc.pop("_id", None)
     return doc
 
@@ -876,7 +982,7 @@ async def my_individual_checkins(limit: int = 60, athlete: dict = Depends(get_cu
     rows = await _db.checkins_v2.find(
         {"athlete_id": athlete["id"], "context": "individual"}, {"_id": 0}
     ).sort("date", -1).to_list(min(limit, 200))
-    return {"checkins": rows}
+    return {"checkins": rows, "today": _today_str()}
 
 
 @platform_router.patch("/checkin/{checkin_id}")
@@ -922,10 +1028,7 @@ async def submit_team_checkin(payload: CheckInPayload, player: dict = Depends(ge
     doc.update({"id": str(uuid.uuid4()), "context": "team", "team_id": player["team_id"],
                 "team_player_id": player["id"], "player_name": player["name"], "date": today,
                 "load": _load_from_payload(payload), "created_at": _now_utc().isoformat()})
-    try:
-        await _db.checkins_v2.insert_one(dict(doc))
-    except Exception:
-        raise HTTPException(409, "You've already submitted a check-in for today.")
+    await _insert_checkin(doc)
     doc.pop("_id", None)
     return doc
 
@@ -935,7 +1038,7 @@ async def my_team_checkins(limit: int = 60, player: dict = Depends(get_current_t
     rows = await _db.checkins_v2.find(
         {"team_player_id": player["id"], "context": "team"}, {"_id": 0}
     ).sort("date", -1).to_list(min(limit, 200))
-    return {"checkins": rows}
+    return {"checkins": rows, "today": _today_str()}
 
 
 @platform_router.patch("/checkin/team/{checkin_id}")
@@ -1164,7 +1267,7 @@ async def team_player_detail(player_id: str, team_id: Optional[str] = None, admi
     acked_today = await _db.player_notes.find_one({
         "team_player_id": player_id, "type": "acknowledgment", "date": _today_str(),
     })
-    return {"player": player, "stats": stats, "checkins": checkins, "acknowledgedToday": bool(acked_today)}
+    return {"player": player, "stats": stats, "checkins": checkins, "acknowledgedToday": bool(acked_today), "today": _today_str()}
 
 
 @platform_router.get("/team/player/{player_id}/export/pdf")
