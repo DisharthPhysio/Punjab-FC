@@ -1,28 +1,34 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle, MessageCircle, Satellite, CalendarDays } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Copy, Users, KeyRound, ShieldCheck, ChevronRight, Gauge, AlertCircle, MessageCircle, Satellite, CalendarDays, PlusCircle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { RiskBadge } from "@/components/platform/RiskBadge";
 import { ExitConfirmButton } from "@/components/platform/ExitConfirmButton";
 import { SleepCorrelation } from "@/components/platform/SleepCorrelation";
 import { ExportButtons } from "@/components/platform/ExportButtons";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
-function waLink(contact, playerName, teamName) {
+function waLink(contact, playerName, teamName, t) {
   const digits = (contact || "").replace(/[^\d]/g, "");
   if (digits.length < 8) return null; // not enough digits to be a usable phone number
-  const message = `Hi ${playerName}, quick reminder to complete today's check-in for ${teamName}. Thanks!`;
+  const message = t("teamHome.reminderMessage", { player: playerName, team: teamName });
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
 function CodeCard({ icon: Icon, label, code, hint }) {
+  const { t } = useTranslation();
   const copy = () => {
     navigator.clipboard.writeText(code);
-    toast.success(`${label} copied`);
+    toast.success(t("teamHome.copied", { label }));
   };
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
@@ -32,7 +38,7 @@ function CodeCard({ icon: Icon, label, code, hint }) {
       </div>
       <div className="flex items-center justify-between">
         <span className="font-mono text-2xl font-extrabold tracking-[0.25em]">{code}</span>
-        <button onClick={copy} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground" aria-label={`Copy ${label}`}>
+        <button onClick={copy} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground" aria-label={t("teamHome.copy", { label })}>
           <Copy className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -42,6 +48,7 @@ function CodeCard({ icon: Icon, label, code, hint }) {
 }
 
 function PlayerCard({ p, onOpen }) {
+  const { t } = useTranslation();
   return (
     <button
       onClick={() => onOpen(p.id)}
@@ -53,7 +60,7 @@ function PlayerCard({ p, onOpen }) {
           <p className="font-bold leading-tight">{p.name}</p>
           {p.joined && p.checkedInToday === false && (
             <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-              <AlertCircle className="h-3 w-3" /> Not checked in today
+              <AlertCircle className="h-3 w-3" /> {t("teamHome.notCheckedIn")}
             </p>
           )}
         </div>
@@ -62,7 +69,7 @@ function PlayerCard({ p, onOpen }) {
       <RiskBadge level={p.riskLevel} />
       {p.joined && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>Week load <b className="font-mono text-foreground">{p.weekLoad ?? "—"}</b></span>
+          <span>{t("teamHome.weekLoad")} <b className="font-mono text-foreground">{p.weekLoad ?? "—"}</b></span>
           {p.readinessToday != null && (
             <span className="inline-flex items-center gap-1"><Gauge className="h-3 w-3" />{p.readinessToday}/100</span>
           )}
@@ -73,6 +80,7 @@ function PlayerCard({ p, onOpen }) {
 }
 
 function RankingRow({ p, rank, onOpen }) {
+  const { t } = useTranslation();
   return (
     <button
       onClick={() => onOpen(p.id)}
@@ -82,32 +90,89 @@ function RankingRow({ p, rank, onOpen }) {
       <span className="w-5 shrink-0 font-mono text-sm font-bold text-muted-foreground">{rank}</span>
       <div className="flex-1">
         <p className="text-sm font-semibold">{p.name}</p>
-        <p className="text-xs text-muted-foreground">Risk score {p.riskScore}</p>
+        <p className="text-xs text-muted-foreground">{t("teamHome.riskScore", { score: p.riskScore })}</p>
       </div>
       <RiskBadge level={p.riskLevel} />
     </button>
   );
 }
 
+/** One account can run several teams: this creates another one and switches to it. */
+function NewTeamDialog({ open, onOpenChange, onCreated }) {
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return toast.error(t("apiErrors.enterTeamName"));
+    setSaving(true);
+    try {
+      const res = await apiV2.post("/admin/teams", { team_name: name.trim() });
+      setName("");
+      await onCreated(res.data.team);
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <form onSubmit={submit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{t("teamHome.newTeamTitle")}</DialogTitle>
+            <DialogDescription>{t("teamHome.newTeamDesc")}</DialogDescription>
+          </DialogHeader>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("teamRegister.teamNamePlaceholder")} data-testid="new-team-name" />
+          <DialogFooter>
+            <Button type="submit" disabled={saving || !name.trim()} data-testid="new-team-submit">
+              {saving ? t("teamRegister.creating") : t("teamRegister.create")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function TeamHome() {
   const navigate = useNavigate();
-  const { user } = usePlatformAuth();
+  const { t } = useTranslation();
+  const { user, teams, activeTeamId, setActiveTeam, refresh } = usePlatformAuth();
   const [codes, setCodes] = useState(null);
   const [dash, setDash] = useState(null);
+  const [newTeamOpen, setNewTeamOpen] = useState(false);
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
+    if (!activeTeamId) return; // teams are still loading
+    const mine = ++requestId.current; // ignore a slow response from the team we just left
+    setCodes(null);
+    setDash(null);
     try {
       const [codesRes, dashRes] = await Promise.all([apiV2.get("/team/codes"), apiV2.get("/team/dashboard")]);
+      if (mine !== requestId.current) return;
       setCodes(codesRes.data);
       setDash(dashRes.data);
     } catch (err) {
-      toast.error(formatApiError(err?.response?.data?.detail));
+      if (mine === requestId.current) toast.error(formatApiError(err?.response?.data?.detail));
     }
-  }, []);
+  }, [activeTeamId]);
 
   useEffect(() => { load(); }, [load]);
 
   const openPlayer = (id) => navigate(`/team/player/${id}`);
+
+  const teamCreated = async (team) => {
+    setActiveTeam(team.id);
+    await refresh();
+    setNewTeamOpen(false);
+    toast.success(t("teamHome.teamCreated", { team: team.team_name }));
+    navigate("/team/roster-setup");
+  };
 
   const ranked = useMemo(() => {
     if (!dash) return [];
@@ -121,60 +186,79 @@ export default function TeamHome() {
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-5 pt-5 sm:px-8">
         <ExitConfirmButton />
-        <div className="flex items-center gap-3">
-          <span className="hidden text-sm font-semibold text-muted-foreground sm:inline">{user?.email}</span>
+        <div className="flex items-center gap-1">
+          <span className="mr-2 hidden text-sm font-semibold text-muted-foreground sm:inline">{user?.email}</span>
+          <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </div>
 
       <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8">
-        <h1 className="display mb-1 text-3xl font-extrabold tracking-tight">{dash?.team_name || codes?.team_name || "Your team"}</h1>
+        <h1 className="display mb-1 text-3xl font-extrabold tracking-tight">{dash?.team_name || codes?.team_name || t("teamHome.yourTeam")}</h1>
+
+        {teams.length > 1 && (
+          <div className="mb-3 mt-2 max-w-xs">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("teamHome.switchTeam")}</p>
+            <Select value={activeTeamId || undefined} onValueChange={setActiveTeam}>
+              <SelectTrigger data-testid="team-switcher"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {teams.map((tm) => <SelectItem key={tm.id} value={tm.id}>{tm.team_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {dash && (
           <p className="mb-6 text-sm text-muted-foreground">
-            {dash.summary.checkedIn}/{dash.summary.total} checked in today
-            {dash.summary.flagged > 0 && <span className="ml-2 font-semibold text-rose-500">· {dash.summary.flagged} need attention</span>}
+            {t("teamHome.checkedInToday", { checkedIn: dash.summary.checkedIn, total: dash.summary.total })}
+            {dash.summary.flagged > 0 && <span className="ml-2 font-semibold text-rose-500">· {t("teamHome.needAttention", { count: dash.summary.flagged })}</span>}
           </p>
         )}
 
         {codes && (
           <div className="mb-6 grid gap-3 sm:grid-cols-2">
-            <CodeCard icon={Users} label="Athlete code" code={codes.athlete_code} hint="Share with players to join & check in." />
-            <CodeCard icon={KeyRound} label="Admin code" code={codes.admin_code} hint="Share with staff who need dashboard access." />
+            <CodeCard icon={Users} label={t("teamHome.athleteCode")} code={codes.athlete_code} hint={t("teamHome.athleteCodeHint")} />
+            <CodeCard icon={KeyRound} label={t("teamHome.adminCode")} code={codes.admin_code} hint={t("teamHome.adminCodeHint")} />
           </div>
         )}
 
         <div className="mb-6 flex flex-wrap items-center gap-3">
           <Button variant="outline" onClick={() => navigate("/team/roster-setup")} className="gap-1.5" data-testid="manage-roster-link">
-            <Users className="h-4 w-4" /> Manage roster
+            <Users className="h-4 w-4" /> {t("teamHome.manageRoster")}
+          </Button>
+          <Button variant="outline" onClick={() => setNewTeamOpen(true)} className="gap-1.5" data-testid="create-another-team">
+            <PlusCircle className="h-4 w-4" /> {t("teamHome.createAnother")}
           </Button>
           <Button variant="outline" onClick={() => navigate("/team/link-code")} className="gap-1.5" data-testid="link-another-team">
-            <ShieldCheck className="h-4 w-4" /> Access another team
+            <ShieldCheck className="h-4 w-4" /> {t("teamHome.accessAnother")}
           </Button>
           <Button variant="outline" onClick={() => navigate("/team/gps")} className="gap-1.5" data-testid="gps-data-link">
-            <Satellite className="h-4 w-4" /> GPS data
+            <Satellite className="h-4 w-4" /> {t("teamHome.gpsData")}
           </Button>
           <Button variant="outline" onClick={() => navigate("/team/calendar")} className="gap-1.5" data-testid="calendar-link">
-            <CalendarDays className="h-4 w-4" /> Day-by-day
+            <CalendarDays className="h-4 w-4" /> {t("teamHome.dayByDay")}
           </Button>
           {dash && (
             <ExportButtons pdfUrl="/team/export/pdf" excelUrl="/team/export/excel" filename={`${dash.team_name}-report`} canShare={false} />
           )}
         </div>
 
+        <NewTeamDialog open={newTeamOpen} onOpenChange={setNewTeamOpen} onCreated={teamCreated} />
+
         {needsReminder.length > 0 && (
           <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
             <p className="mb-3 flex items-center gap-1.5 text-sm font-bold text-amber-700 dark:text-amber-400">
-              <MessageCircle className="h-4 w-4" /> {needsReminder.length} haven't checked in today
+              <MessageCircle className="h-4 w-4" /> {t("teamHome.haventCheckedIn", { count: needsReminder.length })}
             </p>
             <div className="flex flex-wrap gap-2">
               {needsReminder.map((p) => {
-                const link = waLink(p.contact, p.name, dash.team_name);
+                const link = waLink(p.contact, p.name, dash.team_name, t);
                 return (
                   <a
                     key={p.id}
                     href={link || undefined}
                     target="_blank" rel="noreferrer"
-                    onClick={(e) => { if (!link) { e.preventDefault(); toast.error(`No phone number on file for ${p.name}`); } }}
+                    onClick={(e) => { if (!link) { e.preventDefault(); toast.error(t("teamHome.noPhone", { name: p.name })); } }}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${link ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400" : "border-border bg-secondary text-muted-foreground cursor-not-allowed"}`}
                     data-testid={`whatsapp-remind-${p.name}`}
                   >
@@ -193,9 +277,9 @@ export default function TeamHome() {
         ) : (
           <Tabs defaultValue="players">
             <TabsList className="mb-5 grid w-full grid-cols-3">
-              <TabsTrigger value="players" data-testid="cc-tab-players">Players</TabsTrigger>
-              <TabsTrigger value="ranking" data-testid="cc-tab-ranking">Risk ranking</TabsTrigger>
-              <TabsTrigger value="sleep" data-testid="cc-tab-sleep">Sleep</TabsTrigger>
+              <TabsTrigger value="players" data-testid="cc-tab-players">{t("teamHome.tabPlayers")}</TabsTrigger>
+              <TabsTrigger value="ranking" data-testid="cc-tab-ranking">{t("teamHome.tabRanking")}</TabsTrigger>
+              <TabsTrigger value="sleep" data-testid="cc-tab-sleep">{t("teamHome.tabSleep")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="players">
@@ -203,7 +287,7 @@ export default function TeamHome() {
                 {dash.players.map((p) => <PlayerCard key={p.id} p={p} onOpen={openPlayer} />)}
                 {dash.players.length === 0 && (
                   <p className="col-span-2 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                    No players yet — add your roster to get started.
+                    {t("teamHome.noPlayers")}
                   </p>
                 )}
               </div>
@@ -214,12 +298,12 @@ export default function TeamHome() {
                 {ranked.map((p, i) => <RankingRow key={p.id} p={p} rank={i + 1} onOpen={openPlayer} />)}
                 {ranked.length === 0 && (
                   <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                    Ranking appears once players have joined and checked in.
+                    {t("teamHome.rankingEmpty")}
                   </p>
                 )}
                 {notJoined.length > 0 && (
                   <p className="pt-2 text-center text-xs text-muted-foreground">
-                    {notJoined.length} player{notJoined.length > 1 ? "s" : ""} not yet joined — not ranked.
+                    {t("teamHome.notYetJoined", { count: notJoined.length })}
                   </p>
                 )}
               </div>

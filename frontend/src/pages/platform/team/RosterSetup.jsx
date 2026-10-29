@@ -1,14 +1,18 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Users, Plus, X } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
+import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function RosterSetup() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const { activeTeam } = usePlatformAuth();
   const [players, setPlayers] = useState([]);
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
@@ -50,27 +54,27 @@ export default function RosterSetup() {
   };
 
   return (
-    <AuthShell icon={Users} title="Build your roster" subtitle="Add each player's name and contact info" backTo="/team/home" maxWidth="max-w-lg">
+    <AuthShell icon={Users} title={t("roster.title")} subtitle={activeTeam ? t("roster.subtitleTeam", { team: activeTeam.team_name }) : t("roster.subtitle")} backTo="/team/home" maxWidth="max-w-lg">
       <form onSubmit={addPlayer} className="mb-5 flex flex-col gap-2 sm:flex-row">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Player name" data-testid="roster-player-name" className="flex-1" />
-        <Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone / email (optional)" data-testid="roster-player-contact" className="flex-1" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("roster.playerName")} data-testid="roster-player-name" className="flex-1" />
+        <Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder={t("roster.contactPlaceholder")} data-testid="roster-player-contact" className="flex-1" />
         <Button type="submit" disabled={adding || !name.trim()} data-testid="roster-add-player" className="gap-1.5">
-          <Plus className="h-4 w-4" /> Add
+          <Plus className="h-4 w-4" /> {t("roster.add")}
         </Button>
       </form>
 
       <div className="mb-6 space-y-2">
-        {players.length === 0 && <p className="text-center text-sm text-muted-foreground">No players added yet.</p>}
+        {players.length === 0 && <p className="text-center text-sm text-muted-foreground">{t("roster.none")}</p>}
         {players.map((p) => (
           <div key={p.id} className="flex items-center justify-between rounded-xl border border-border bg-background px-4 py-2.5">
             <div>
               <p className="text-sm font-semibold">{p.name}</p>
               <p className="text-xs text-muted-foreground">
                 {p.contact ? `${p.contact} · ` : ""}
-                <span className={p.joined ? "text-emerald-600 dark:text-emerald-400" : ""}>{p.joined ? "Joined" : "Not joined"}</span>
+                <span className={p.joined ? "text-emerald-600 dark:text-emerald-400" : ""}>{p.joined ? t("roster.joined") : t("risk.notJoined")}</span>
               </p>
             </div>
-            <button onClick={() => removePlayer(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label={`Remove ${p.name}`}>
+            <button onClick={() => removePlayer(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label={t("roster.remove", { name: p.name })}>
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -78,12 +82,11 @@ export default function RosterSetup() {
       </div>
 
       <p className="mb-4 text-xs text-muted-foreground">
-        A player can always log in on a new device just by entering the team code and picking their
-        name again — there's no "reset" step needed anymore.
+        {t("roster.loginNote")}
       </p>
 
       <Button className="w-full" size="lg" onClick={() => navigate("/team/home")} data-testid="roster-continue">
-        {players.length > 0 ? "Continue" : "Skip for now"}
+        {players.length > 0 ? t("common.continue") : t("roster.skip")}
       </Button>
     </AuthShell>
   );

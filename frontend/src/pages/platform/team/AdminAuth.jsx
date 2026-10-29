@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -13,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function AdminAuth() {
   const navigate = useNavigate();
   const { login } = usePlatformAuth();
+  const { t } = useTranslation();
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,39 +42,38 @@ export default function AdminAuth() {
   };
 
   return (
-    <AuthShell icon={ShieldCheck} title="Admin access" subtitle="Team owners log in here too" backTo="/team">
+    <AuthShell icon={ShieldCheck} title={t("adminAuth.title")} subtitle={t("adminAuth.subtitle")} backTo="/team">
       <Tabs value={mode} onValueChange={setMode} className="mb-6">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login" data-testid="admin-tab-login">Log in</TabsTrigger>
-          <TabsTrigger value="signup" data-testid="admin-tab-signup">New admin</TabsTrigger>
+          <TabsTrigger value="login" data-testid="admin-tab-login">{t("athleteAuth.login")}</TabsTrigger>
+          <TabsTrigger value="signup" data-testid="admin-tab-signup">{t("adminAuth.newAdmin")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
       {mode === "signup" && (
         <p className="mb-4 rounded-lg bg-secondary/60 px-3 py-2 text-xs text-muted-foreground">
-          Use this if someone (e.g. a physio) needs access to a team they don't own — you'll enter the team's
-          admin code on the next screen. Registering a brand-new team? Go back and choose "New team" instead.
+          {t("adminAuth.newAdminHint")}
         </p>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="ad-email">Email</Label>
+          <Label htmlFor="ad-email">{t("athleteAuth.email")}</Label>
           <Input id="ad-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" data-testid="admin-email" />
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label htmlFor="ad-pass">Password</Label>
+            <Label htmlFor="ad-pass">{t("athleteAuth.password")}</Label>
             {mode === "login" && (
               <button type="button" onClick={() => navigate(`/forgot-password?role=admin&email=${encodeURIComponent(email.trim().toLowerCase())}`)} className="text-xs font-medium text-primary hover:underline">
-                Forgot password?
+                {t("athleteAuth.forgotPassword")}
               </button>
             )}
           </div>
-          <Input id="ad-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" data-testid="admin-password" />
+          <Input id="ad-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="admin-password" />
         </div>
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="admin-submit">
-          {submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
+          {submitting ? t("common.pleaseWait") : mode === "signup" ? t("athleteAuth.createAccount") : t("athleteAuth.login")}
         </Button>
       </form>
     </AuthShell>

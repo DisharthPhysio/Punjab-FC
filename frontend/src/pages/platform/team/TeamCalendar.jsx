@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CalendarDays, CheckCircle2, Circle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { Calendar } from "@/components/ui/calendar";
+import { dateFnsLocale } from "@/lib/dates";
 
 function toDateStr(d) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
@@ -14,6 +16,7 @@ function toMonthStr(d) {
 }
 
 export default function TeamCalendar() {
+  const { t, i18n } = useTranslation();
   const [month, setMonth] = useState(new Date());
   const [daysWithCheckins, setDaysWithCheckins] = useState([]);
   const [selected, setSelected] = useState(new Date());
@@ -44,7 +47,7 @@ export default function TeamCalendar() {
   const highlightedDates = daysWithCheckins.map((d) => new Date(d + "T00:00:00"));
 
   return (
-    <AuthShell icon={CalendarDays} title="Day-by-day" subtitle="Browse any date's check-in status" backTo="/team/home" maxWidth="max-w-lg">
+    <AuthShell icon={CalendarDays} title={t("calendar.title")} subtitle={t("calendar.subtitle")} backTo="/team/home" maxWidth="max-w-lg">
       <div className="space-y-6">
         <div className="rounded-2xl border border-border bg-card p-2">
           <Calendar
@@ -55,13 +58,14 @@ export default function TeamCalendar() {
             modifiers={{ hasCheckins: highlightedDates }}
             modifiersClassNames={{ hasCheckins: "font-bold underline decoration-primary decoration-2 underline-offset-4" }}
             disabled={{ after: new Date() }}
+            locale={dateFnsLocale(i18n.language)}
             className="mx-auto"
           />
         </div>
 
         <div>
           <p className="mb-3 text-sm font-bold">
-            {selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            {selected.toLocaleDateString(i18n.language, { weekday: "long", month: "long", day: "numeric" })}
           </p>
           {!dayData ? (
             <div className="grid place-items-center py-6">
@@ -77,14 +81,14 @@ export default function TeamCalendar() {
                   </div>
                   {p.checkedIn && p.checkin && (
                     <span className="text-xs text-muted-foreground">
-                      Sleep {p.checkin.sleepQuality}/5 · Load {p.checkin.load ?? "—"}
+                      {t("calendar.sleepLoad", { sleep: p.checkin.sleepQuality, load: p.checkin.load ?? "—" })}
                     </span>
                   )}
-                  {!p.joined && <span className="text-xs text-muted-foreground">Not joined</span>}
+                  {!p.joined && <span className="text-xs text-muted-foreground">{t("risk.notJoined")}</span>}
                 </div>
               ))}
               {dayData.players.length === 0 && (
-                <p className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">No players on the roster yet.</p>
+                <p className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">{t("calendar.noPlayers")}</p>
               )}
             </div>
           )}

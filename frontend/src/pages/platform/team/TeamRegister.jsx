@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { PlusCircle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 export default function TeamRegister() {
   const navigate = useNavigate();
   const { login } = usePlatformAuth();
+  const { t } = useTranslation();
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +25,7 @@ export default function TeamRegister() {
     const cleanEmail = email.trim().toLowerCase();
     try {
       const res = await apiV2.post("/team/register", { team_name: teamName.trim(), email: cleanEmail, password });
-      await login("admin", res.data.token, res.data.admin);
+      await login("admin", res.data.token, res.data.admin, { teamId: res.data.team?.id });
       navigate("/team/roster-setup", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
@@ -33,23 +35,24 @@ export default function TeamRegister() {
   };
 
   return (
-    <AuthShell icon={PlusCircle} title="Register your team" subtitle="This also becomes your admin login" backTo="/team">
+    <AuthShell icon={PlusCircle} title={t("teamRegister.title")} subtitle={t("teamRegister.subtitle")} backTo="/team">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="t-name">Team name</Label>
-          <Input id="t-name" required value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="e.g. Punjab FC U19" data-testid="team-name-input" />
+          <Label htmlFor="t-name">{t("teamRegister.teamName")}</Label>
+          <Input id="t-name" required value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder={t("teamRegister.teamNamePlaceholder")} data-testid="team-name-input" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="t-email">Email</Label>
+          <Label htmlFor="t-email">{t("athleteAuth.email")}</Label>
           <Input id="t-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="coach@example.com" data-testid="team-email-input" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="t-pass">Password</Label>
-          <Input id="t-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" data-testid="team-password-input" />
+          <Label htmlFor="t-pass">{t("athleteAuth.password")}</Label>
+          <Input id="t-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="team-password-input" />
         </div>
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="team-register-submit">
-          {submitting ? "Creating…" : "Create team"}
+          {submitting ? t("teamRegister.creating") : t("teamRegister.create")}
         </Button>
+        <p className="rounded-lg bg-secondary/60 px-3 py-2 text-xs text-muted-foreground" data-testid="team-register-existing-hint">{t("teamRegister.existingHint")}</p>
       </form>
     </AuthShell>
   );

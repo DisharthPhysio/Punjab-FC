@@ -1,16 +1,17 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { PlusCircle, ShieldCheck, ChevronRight } from "lucide-react";
 import { AuthShell } from "@/components/platform/AuthShell";
 
-const OPTIONS = [
-  { key: "new", title: "New team", desc: "Register your club or squad and build your roster.", icon: PlusCircle, to: "/team/register" },
-  { key: "admin", title: "Admin access", desc: "Log in, or get access to a team you don't manage yet.", icon: ShieldCheck, to: "/team/admin-auth" },
-];
-
 export default function TeamLanding() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const OPTIONS = [
+    { key: "new", title: t("teamLanding.newTitle"), desc: t("teamLanding.newDesc"), icon: PlusCircle, to: "/team/register" },
+    { key: "admin", title: t("teamLanding.adminTitle"), desc: t("teamLanding.adminDesc"), icon: ShieldCheck, to: "/team/admin-auth" },
+  ];
   return (
-    <AuthShell icon={ShieldCheck} title="Team login" subtitle="Are you registering a new team, or accessing one?" maxWidth="max-w-lg">
+    <AuthShell icon={ShieldCheck} title={t("teamLanding.title")} subtitle={t("teamLanding.subtitle")} maxWidth="max-w-lg">
       <div className="space-y-3">
         {OPTIONS.map((opt) => (
           <button
