@@ -1,4 +1,6 @@
 import axios from "axios";
+import i18n from "@/i18n";
+import { translateApiError } from "@/lib/apiErrors";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -11,8 +13,8 @@ api.interceptors.request.use((config) => {
 });
 
 export function formatApiError(detail) {
-  if (detail == null) return "Something went wrong. Please try again.";
-  if (typeof detail === "string") return detail;
+  if (detail == null) return i18n.t("apiErrors.generic");
+  if (typeof detail === "string") return translateApiError(detail);
   if (Array.isArray(detail))
     return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).filter(Boolean).join(" ");
   if (detail && typeof detail.msg === "string") return detail.msg;
