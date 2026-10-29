@@ -24,7 +24,7 @@ export default function JoinTeam() {
   const [submitting, setSubmitting] = useState(false);
 
   const lookup = async () => {
-    if (code.length !== 6) return toast.error("Enter the 6-digit team code");
+    if (code.length !== 6) return toast.error(t("joinTeam.enterCode"));
     setSubmitting(true);
     try {
       const res = await apiV2.post("/team/join", { code });
@@ -39,12 +39,12 @@ export default function JoinTeam() {
   };
 
   const confirmName = async () => {
-    if (!selected) return toast.error("Select your name to continue");
+    if (!selected) return toast.error(t("joinTeam.selectName"));
     setSubmitting(true);
     try {
       const res = await apiV2.post("/team/select", { code, player_id: selected });
       await login("team_athlete", res.data.token, res.data.player);
-      toast.success(`You're in — welcome to ${team.team_name}!`);
+      toast.success(t("joinTeam.welcome", { team: team.team_name }));
       navigate("/athlete/team", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));

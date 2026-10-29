@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, Users, Pencil } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
+import { localDateStr } from "@/lib/dates";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
 import { CheckInForm } from "@/components/platform/CheckInForm";
@@ -12,20 +13,19 @@ import { ExportButtons } from "@/components/platform/ExportButtons";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function TeamHub() {
   const { team } = usePlatformAuth();
   const { t } = useTranslation();
   const [checkins, setCheckins] = useState(null);
+  const [serverToday, setServerToday] = useState(null); // the server's idea of "today" - what its once-a-day rule uses
   const [editing, setEditing] = useState(null);
 
   const load = useCallback(async () => {
     try {
       const res = await apiV2.get("/checkin/team/mine");
       setCheckins(res.data.checkins);
+      setServerToday(res.data.today || null);
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
       setCheckins([]);
@@ -34,7 +34,7 @@ export default function TeamHub() {
 
   useEffect(() => { load(); }, [load]);
 
-  const today = checkins?.find((c) => c.date === todayStr());
+  const today = checkins?.find((c) => c.date === (serverToday || localDateStr()));
 
   const handleSubmit = async (payload) => {
     try {
