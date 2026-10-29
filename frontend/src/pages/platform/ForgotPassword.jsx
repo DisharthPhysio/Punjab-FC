@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { AuthShell } from "@/components/platform/AuthShell";
@@ -12,6 +13,7 @@ export default function ForgotPassword() {
   const [params] = useSearchParams();
   const role = params.get("role") || "athlete"; // "athlete" | "admin"
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [email, setEmail] = useState(params.get("email") || "");
   const [submitting, setSubmitting] = useState(false);
 
@@ -20,7 +22,7 @@ export default function ForgotPassword() {
     setSubmitting(true);
     try {
       await apiV2.post(`/${role}/forgot-password`, { email: email.trim().toLowerCase() });
-      toast.success("If that account exists, a reset code is on its way.");
+      toast.success(t("forgot.sent"));
       navigate(`/reset-password?role=${role}&email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail));
@@ -30,10 +32,10 @@ export default function ForgotPassword() {
   };
 
   return (
-    <AuthShell icon={KeyRound} title="Forgot password" subtitle="We'll email you a code to reset it." backTo={role === "admin" ? "/team/admin-auth" : "/athlete/individual"}>
+    <AuthShell icon={KeyRound} title={t("forgot.title")} subtitle={t("forgot.subtitle")} backTo={role === "admin" ? "/team/admin-auth" : "/athlete/individual"}>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="space-y-1.5">
-          <Label htmlFor="fp-email">Email</Label>
+          <Label htmlFor="fp-email">{t("athleteAuth.email")}</Label>
           <Input
             id="fp-email"
             type="email"
@@ -45,7 +47,7 @@ export default function ForgotPassword() {
           />
         </div>
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="forgot-password-submit">
-          {submitting ? "Sending…" : "Send reset code"}
+          {submitting ? t("forgot.sending") : t("forgot.send")}
         </Button>
       </form>
     </AuthShell>

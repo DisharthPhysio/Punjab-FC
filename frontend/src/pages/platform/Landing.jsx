@@ -84,7 +84,7 @@ export default function Landing() {
         </div>
 
         <Link to="/privacy" className="mt-10 text-xs text-muted-foreground hover:text-primary" data-testid="landing-privacy-link">
-          Privacy Policy
+          {t("privacy.title")}
         </Link>
       </div>
     </div>
