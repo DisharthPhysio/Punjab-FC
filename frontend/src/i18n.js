@@ -18,4 +18,8 @@ i18n
     detection: { order: ["localStorage", "navigator"], lookupLocalStorage: "pfc_lang", caches: ["localStorage"] },
   });
 
+const syncHtmlLang = (lng) => { document.documentElement.lang = (lng || "en").split("-")[0]; };
+i18n.on("languageChanged", syncHtmlLang);
+syncHtmlLang(i18n.language);
+
 export default i18n;
