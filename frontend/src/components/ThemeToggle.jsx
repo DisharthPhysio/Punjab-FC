@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Moon, Sun } from "lucide-react";
 
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem("theme");
     return saved ? saved === "dark" : true;
@@ -19,7 +21,7 @@ export function ThemeToggle() {
       data-testid="theme-toggle-button"
       onClick={() => setDark((d) => !d)}
       className="grid h-10 w-10 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-primary"
-      aria-label="Toggle theme"
+      aria-label={t("theme.toggle")}
     >
       {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
