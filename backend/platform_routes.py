@@ -21,16 +21,20 @@ Auth model (v2, simplified — no email verification step anywhere):
     athlete/admin account, or reset a team athlete's claim on their roster
     slot — the moderation safety net now that signup has no verification gate.
 
-Password reset (forgot-password) still uses an emailed code — that is a
-different, still-justified security control (proving you own the email
-before changing a password), independent of the removed signup verification.
+Password reset works WITHOUT email: every athlete/admin account picks a personal
+recovery question + answer at signup (existing accounts are asked once after their
+next login). Forgot-password = email + the question you chose + your answer.
+Only a salted hash of the (normalised) answer is stored.
 """
+import hashlib
 import logging
 import os
 import re
 import secrets
 import statistics
+import unicodedata
 import uuid
+from urllib.parse import quote as urlquote
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
@@ -40,6 +44,9 @@ from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
 
 import export_utils
+import insights as insights_engine
+import metrics as metrics_engine
+import reports
 import gps_import
 
 logger = logging.getLogger(__name__)
@@ -57,6 +64,8 @@ _now_utc = None
 _today_str = None
 
 CODE_TTL_MINUTES = 15
+# Individual athletes stay logged in (a fresh token is issued on every visit), so check-in is one tap.
+ATHLETE_TOKEN_DAYS = 365
 # Max team-athlete logins (code + pick-your-name) per team per day. Individual athletes are NOT limited.
 TEAM_DAILY_LOGIN_LIMIT = int(os.environ.get("TEAM_DAILY_LOGIN_LIMIT", "150"))
 # One account may own several teams; this just keeps the lists the app loads (to_list(50)) complete.
@@ -191,55 +200,8 @@ def code_is_valid(stored_code: Optional[str], stored_expiry: Optional[str], subm
 
 # Same Foster (1998) formula as the legacy single-team dashboard (server.py's week_stats),
 # duplicated here (rather than imported) to keep this module import-cycle-free.
-MONOTONY_WATCH = 1.5
-MONOTONY_HIGH = 2.0
-
-
-def week_stats(daily_loads: List[int]) -> dict:
-    total = sum(daily_loads)
-    out = {"load": total, "daysLogged": sum(1 for x in daily_loads if x > 0),
-           "monotony": None, "strain": None, "monotonyRisk": None}
-    if total <= 0 or len(daily_loads) < 2:
-        return out
-    sd = statistics.stdev(daily_loads)
-    if sd == 0:
-        return out
-    mono_raw = (total / len(daily_loads)) / sd
-    mono = round(mono_raw, 2)
-    out["monotony"] = mono
-    out["strain"] = int(round(total * mono_raw))
-    out["monotonyRisk"] = "red" if mono >= MONOTONY_HIGH else ("amber" if mono >= MONOTONY_WATCH else "green")
-    return out
-
-
-def pearson_r(xs: List[float], ys: List[float]) -> Optional[float]:
-    n = len(xs)
-    if n < 3:
-        return None
-    mean_x, mean_y = sum(xs) / n, sum(ys) / n
-    cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    var_x = sum((x - mean_x) ** 2 for x in xs)
-    var_y = sum((y - mean_y) ** 2 for y in ys)
-    if var_x <= 0 or var_y <= 0:
-        return None
-    return round(cov / ((var_x ** 0.5) * (var_y ** 0.5)), 2)
-
-
-def change_pct(current, previous):
-    return int(round((current - previous) / previous * 100)) if previous and previous > 0 else None
-
-
-def readiness_score(c: Optional[dict]) -> Optional[int]:
-    if not c:
-        return None
-    sleep_q, hyd, mot = c.get("sleepQuality"), c.get("hydration"), c.get("motivation")
-    if not sleep_q or not hyd or not mot:
-        return None
-    soreness = c.get("sorenessSeverity") or 0
-    score = 100 * (0.30 * sleep_q / 5 + 0.25 * hyd / 5 + 0.25 * mot / 5 + 0.20 * (5 - soreness) / 5)
-    if c.get("feelingIll"):
-        score -= 20
-    return max(0, min(100, round(score)))
+# One source of truth for the load / readiness maths (also used by the reports). See metrics.py.
+from metrics import MONOTONY_HIGH, MONOTONY_WATCH, change_pct, pearson_r, readiness_score, week_stats  # noqa: E402,F401
 
 
 def make_token(sub: str, ttype: str, days: int = 30, **extra) -> str:
@@ -264,7 +226,8 @@ def bearer_token(request: Request) -> str:
     return auth[7:]
 
 
-_PRIVATE_FIELDS = {"_id": 0, "password_hash": 0, "verify_code": 0, "verify_code_expires": 0, "reset_code": 0, "reset_code_expires": 0}
+_PRIVATE_FIELDS = {"_id": 0, "password_hash": 0, "verify_code": 0, "verify_code_expires": 0, "reset_code": 0, "reset_code_expires": 0,
+                  "recovery_question": 0, "recovery_answer_hash": 0, "recovery_fail_count": 0, "recovery_locked_until": 0, "recovery_set_at": 0}
 
 
 async def get_current_athlete(request: Request) -> dict:
@@ -324,26 +287,6 @@ async def _admins_team(admin: dict, team_id: Optional[str] = None) -> dict:
     return team
 
 
-# ---------- email templates (forgot/reset-password only now) ----------
-def _code_email_html(title: str, code: str, note: str) -> str:
-    return f"""
-    <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;">
-      <div style="background:#0B0F17;color:#fff;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-        <h2 style="margin:0;letter-spacing:0.5px;">{title}</h2>
-      </div>
-      <div style="border:1px solid #eee;border-top:none;padding:28px;border-radius:0 0 12px 12px;text-align:center;">
-        <p style="color:#555;margin:0 0 18px;">{note}</p>
-        <div style="font-size:34px;font-weight:800;letter-spacing:10px;color:#0B7A4B;background:#F0FDF4;border-radius:10px;padding:16px 0;">{code}</div>
-        <p style="color:#999;font-size:12px;margin-top:18px;">This code expires in {CODE_TTL_MINUTES} minutes. If you didn't request this, you can ignore this email.</p>
-      </div>
-    </div>"""
-
-
-async def send_reset_code_email(to_email: str, code: str):
-    html = _code_email_html("Reset your password", code, "Enter this code to set a new password.")
-    await _send_email("Your password reset code", html, to=[to_email])
-
-
 def _password_ok(pw: str):
     if len(pw or "") < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
@@ -354,32 +297,42 @@ class AthleteSignup(BaseModel):
     name: str
     email: str
     password: str
+    recovery_question: Optional[str] = None
+    recovery_answer: Optional[str] = None
 
 
 class TeamRegisterPayload(BaseModel):
     team_name: str
     email: str
     password: str
+    recovery_question: Optional[str] = None   # required for a NEW account, ignored when adding a team to an existing one
+    recovery_answer: Optional[str] = None
 
 
 class AdminSignup(BaseModel):
     email: str
     password: str
+    recovery_question: Optional[str] = None
+    recovery_answer: Optional[str] = None
+
+
+class RecoverySetPayload(BaseModel):
+    question_id: str
+    answer: str
+    current_password: Optional[str] = None    # only needed to CHANGE an already-set question
+
+
+class RecoveryResetPayload(BaseModel):
+    role: Literal["athlete", "admin"]
+    email: str
+    question_id: str
+    answer: str
+    new_password: str
 
 
 class LoginPayload(BaseModel):
     email: str
     password: str
-
-
-class ForgotPayload(BaseModel):
-    email: str
-
-
-class ResetPayload(BaseModel):
-    email: str
-    code: str
-    new_password: str
 
 
 class RosterPlayerPayload(BaseModel):
@@ -453,6 +406,100 @@ def _load_from_payload(payload: CheckInPayload) -> int:
     return payload.rpe * payload.duration
 
 
+# ================= Account recovery (security question — no email needed) =================
+RECOVERY_QUESTIONS = ("birth_date", "fav_teacher", "first_school", "birth_place", "childhood_friend", "first_pet", "first_coach", "fav_sportsperson")
+RECOVERY_MAX_FAILS = 5
+RECOVERY_LOCK_MINUTES = 30
+RECOVERY_MISMATCH_MSG = "The email, question or answer doesn't match our records."
+RECOVERY_LOCKED_MSG = "Too many wrong attempts. Please try again in 30 minutes."
+
+
+def _norm_answer(answer: str) -> str:
+    """Case, spacing, punctuation and accents-as-typed don't matter: '12/05/2000', '12-05-2000' and
+    '12 05 2000' are the same answer. Letters/digits/combining marks of ANY script are kept (Hindi, Greek...)."""
+    a = unicodedata.normalize("NFKC", answer or "").casefold().strip()
+    # dates: '1-2-1980', '01/02/1980' and '1 2 1980' are one answer (leading zeros on day/month don't matter)
+    d = re.fullmatch(r"(\d{1,2})\s*[/\-. ]\s*(\d{1,2})\s*[/\-. ]\s*(\d{2}|\d{4})", a)
+    if d:
+        return f"{int(d.group(1)):02d}{int(d.group(2)):02d}{d.group(3)}"
+    return "".join(ch for ch in a if unicodedata.category(ch)[0] in "LNM")
+
+
+def _answer_secret(answer: str) -> str:
+    # SHA-256 first so bcrypt's 72-byte limit can't silently truncate long (or non-Latin) answers
+    return hashlib.sha256(_norm_answer(answer).encode("utf-8")).hexdigest()
+
+
+def _validate_recovery(question_id: Optional[str], answer: Optional[str]):
+    if not question_id or not (answer or "").strip():
+        raise HTTPException(400, "Choose a recovery question and give an answer.")
+    if question_id not in RECOVERY_QUESTIONS:
+        raise HTTPException(400, "Choose one of the listed questions.")
+    if len(_norm_answer(answer)) < 2:
+        raise HTTPException(400, "Your answer is too short.")
+
+
+def _recovery_fields(question_id: str, answer: str) -> dict:
+    return {"recovery_question": question_id, "recovery_answer_hash": _hash_password(_answer_secret(answer)),
+            "recovery_fail_count": 0, "recovery_locked_until": None, "recovery_set_at": _now_utc().isoformat()}
+
+
+async def _has_recovery(collection, account_id: str) -> bool:
+    return bool(await collection.count_documents({"id": account_id, "recovery_answer_hash": {"$exists": True, "$ne": None}}))
+
+
+async def get_current_account(request: Request):
+    """Athlete OR admin (the two account types that have a password)."""
+    payload = decode_token(bearer_token(request))
+    kind = payload.get("type")
+    if kind not in ("athlete", "admin"):
+        raise HTTPException(401, "Not authenticated")
+    coll = _db.athletes if kind == "athlete" else _db.admins
+    account = await coll.find_one({"id": payload["sub"]}, _PRIVATE_FIELDS)
+    if not account:
+        raise HTTPException(401, "Account not found")
+    return kind, account, coll
+
+
+@platform_router.post("/account/recovery")
+async def set_recovery(payload: RecoverySetPayload, ctx=Depends(get_current_account)):
+    """First time (existing accounts are asked once after login): no extra proof needed.
+    Changing an already-set question requires the current password."""
+    kind, account, coll = ctx
+    _validate_recovery(payload.question_id, payload.answer)
+    full = await coll.find_one({"id": account["id"]}, {"password_hash": 1, "recovery_answer_hash": 1})
+    if full.get("recovery_answer_hash") and not (payload.current_password and _verify_password(payload.current_password, full["password_hash"])):
+        raise HTTPException(401, "Your current password is incorrect.")
+    await coll.update_one({"id": account["id"]}, {"$set": _recovery_fields(payload.question_id, payload.answer)})
+    return {"has_recovery": True}
+
+
+@platform_router.post("/auth/recovery/reset")
+async def recovery_reset(payload: RecoveryResetPayload):
+    """Forgot password: email + the question the person picked at signup + their answer.
+    The question is NOT revealed to whoever types an email, so this can't be used to probe accounts."""
+    _password_ok(payload.new_password)
+    coll = _db.athletes if payload.role == "athlete" else _db.admins
+    account = await coll.find_one({"email": norm_email(payload.email)})
+    if account:
+        locked = account.get("recovery_locked_until")
+        if locked and _parse_iso(locked) > _now_utc():
+            raise HTTPException(429, RECOVERY_LOCKED_MSG)
+    good = bool(account and account.get("recovery_answer_hash") and account.get("recovery_question") == payload.question_id
+                and _verify_password(_answer_secret(payload.answer), account["recovery_answer_hash"]))
+    if not good:
+        if account and account.get("recovery_answer_hash"):
+            fails = (account.get("recovery_fail_count") or 0) + 1
+            upd = {"recovery_fail_count": fails}
+            if fails >= RECOVERY_MAX_FAILS:
+                upd = {"recovery_fail_count": 0, "recovery_locked_until": (_now_utc() + timedelta(minutes=RECOVERY_LOCK_MINUTES)).isoformat()}
+            await coll.update_one({"id": account["id"]}, {"$set": upd})
+        raise HTTPException(400, RECOVERY_MISMATCH_MSG)
+    await coll.update_one({"id": account["id"]}, {"$set": {
+        "password_hash": _hash_password(payload.new_password), "recovery_fail_count": 0, "recovery_locked_until": None}})
+    return {"message": "Password updated. You can now log in."}
+
+
 # ================= Athlete auth (individual only — no verification step) =================
 @platform_router.post("/athlete/signup")
 async def athlete_signup(payload: AthleteSignup):
@@ -464,14 +511,15 @@ async def athlete_signup(payload: AthleteSignup):
     _password_ok(payload.password)
     if await _db.athletes.find_one({"email": email}):
         raise HTTPException(409, "An account with this email already exists. Try logging in.")
+    _validate_recovery(payload.recovery_question, payload.recovery_answer)
     athlete_id = str(uuid.uuid4())
     await _db.athletes.insert_one({
         "id": athlete_id, "name": payload.name.strip(), "email": email,
         "password_hash": _hash_password(payload.password),
-        "reset_code": None, "reset_code_expires": None,
+        **_recovery_fields(payload.recovery_question, payload.recovery_answer),
         "created_at": _now_utc().isoformat(),
     })
-    token = make_token(athlete_id, "athlete")
+    token = make_token(athlete_id, "athlete", days=ATHLETE_TOKEN_DAYS)
     return {"token": token, "athlete": {"id": athlete_id, "name": payload.name.strip(), "email": email}}
 
 
@@ -481,38 +529,15 @@ async def athlete_login(payload: LoginPayload):
     athlete = await _db.athletes.find_one({"email": email})
     if not athlete or not _verify_password(payload.password, athlete["password_hash"]):
         raise HTTPException(401, "Incorrect email or password")
-    token = make_token(athlete["id"], "athlete")
+    token = make_token(athlete["id"], "athlete", days=ATHLETE_TOKEN_DAYS)
     return {"token": token, "athlete": {"id": athlete["id"], "name": athlete["name"], "email": email}}
-
-
-@platform_router.post("/athlete/forgot-password")
-async def athlete_forgot(payload: ForgotPayload):
-    email = norm_email(payload.email)
-    athlete = await _db.athletes.find_one({"email": email})
-    if athlete:
-        code = gen_code()
-        await _db.athletes.update_one({"email": email}, {"$set": {"reset_code": code, "reset_code_expires": code_expiry().isoformat()}})
-        await send_reset_code_email(email, code)
-    return {"message": "If an account exists for that email, a reset code has been sent."}
-
-
-@platform_router.post("/athlete/reset-password")
-async def athlete_reset(payload: ResetPayload):
-    email = norm_email(payload.email)
-    athlete = await _db.athletes.find_one({"email": email})
-    if not athlete:
-        raise HTTPException(404, "Account not found")
-    if not code_is_valid(athlete.get("reset_code"), athlete.get("reset_code_expires"), payload.code):
-        raise HTTPException(400, "That code is invalid or has expired.")
-    _password_ok(payload.new_password)
-    await _db.athletes.update_one({"email": email}, {"$set": {
-        "password_hash": _hash_password(payload.new_password), "reset_code": None, "reset_code_expires": None}})
-    return {"message": "Password updated. You can now log in."}
 
 
 @platform_router.get("/athlete/me")
 async def athlete_me(athlete: dict = Depends(get_current_athlete)):
-    return {"athlete": athlete}
+    # a fresh long-lived token on every visit: a person who keeps using the app is never logged out
+    return {"athlete": athlete, "has_recovery": await _has_recovery(_db.athletes, athlete["id"]),
+            "token": make_token(athlete["id"], "athlete", days=ATHLETE_TOKEN_DAYS)}
 
 
 # ================= Team athlete: code + pick your name, no account at all =================
@@ -572,7 +597,8 @@ async def team_select(payload: SelectPlayerPayload):
 @platform_router.get("/team/mine")
 async def team_mine(player: dict = Depends(get_current_team_athlete)):
     team = await _db.teams.find_one({"id": player["team_id"]}, {"_id": 0, "id": 1, "team_name": 1})
-    return {"team": team, "player": {"id": player["id"], "name": player["name"]}}
+    return {"team": team, "player": {"id": player["id"], "name": player["name"]},
+            "token": make_token(player["id"], "team_athlete", days=365, team_id=player["team_id"])}
 
 
 # ================= Team registration & Admin auth (no verification step) =================
@@ -624,10 +650,11 @@ async def team_register(payload: TeamRegisterPayload):
         token = make_token(existing["id"], "admin")
         return {"token": token, "admin": {"id": existing["id"], "email": email}, "team": team}
 
+    _validate_recovery(payload.recovery_question, payload.recovery_answer)
     admin_id = str(uuid.uuid4())
     await _db.admins.insert_one({
         "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
-        "reset_code": None, "reset_code_expires": None,
+        **_recovery_fields(payload.recovery_question, payload.recovery_answer),
         "team_ids": [], "created_at": _now_utc().isoformat(),
     })
     team = await _create_team_for_admin(admin_id, payload.team_name)
@@ -658,10 +685,11 @@ async def admin_signup(payload: AdminSignup):
     _password_ok(payload.password)
     if await _db.admins.find_one({"email": email}):
         raise HTTPException(409, "An account with this email already exists. Try logging in.")
+    _validate_recovery(payload.recovery_question, payload.recovery_answer)
     admin_id = str(uuid.uuid4())
     await _db.admins.insert_one({
         "id": admin_id, "email": email, "password_hash": _hash_password(payload.password),
-        "reset_code": None, "reset_code_expires": None,
+        **_recovery_fields(payload.recovery_question, payload.recovery_answer),
         "team_ids": [], "created_at": _now_utc().isoformat(),
     })
     token = make_token(admin_id, "admin")
@@ -679,31 +707,6 @@ async def admin_login(payload: LoginPayload):
     return {"token": token, "admin": {"id": admin["id"], "email": email}, "needs_code": len(teams) == 0, "teams": teams}
 
 
-@platform_router.post("/admin/forgot-password")
-async def admin_forgot(payload: ForgotPayload):
-    email = norm_email(payload.email)
-    admin = await _db.admins.find_one({"email": email})
-    if admin:
-        code = gen_code()
-        await _db.admins.update_one({"email": email}, {"$set": {"reset_code": code, "reset_code_expires": code_expiry().isoformat()}})
-        await send_reset_code_email(email, code)
-    return {"message": "If an account exists for that email, a reset code has been sent."}
-
-
-@platform_router.post("/admin/reset-password")
-async def admin_reset(payload: ResetPayload):
-    email = norm_email(payload.email)
-    admin = await _db.admins.find_one({"email": email})
-    if not admin:
-        raise HTTPException(404, "Account not found")
-    if not code_is_valid(admin.get("reset_code"), admin.get("reset_code_expires"), payload.code):
-        raise HTTPException(400, "That code is invalid or has expired.")
-    _password_ok(payload.new_password)
-    await _db.admins.update_one({"email": email}, {"$set": {
-        "password_hash": _hash_password(payload.new_password), "reset_code": None, "reset_code_expires": None}})
-    return {"message": "Password updated. You can now log in."}
-
-
 @platform_router.post("/admin/link-team")
 async def admin_link_team(payload: TeamCodePayload, admin: dict = Depends(get_current_admin)):
     team = await _db.teams.find_one({"admin_code": payload.code.strip()})
@@ -717,7 +720,7 @@ async def admin_link_team(payload: TeamCodePayload, admin: dict = Depends(get_cu
 @platform_router.get("/admin/me")
 async def admin_me(admin: dict = Depends(get_current_admin)):
     teams = await _db.teams.find({"id": {"$in": admin.get("team_ids") or []}}, {"_id": 0}).to_list(50)
-    return {"admin": admin, "teams": teams}
+    return {"admin": admin, "teams": teams, "has_recovery": await _has_recovery(_db.admins, admin["id"])}
 
 
 # ================= Roster & codes (admin) =================
@@ -939,6 +942,128 @@ async def gps_analysis(player_id: str, team_id: Optional[str] = None, admin: dic
     }
 
 
+# ================= Reports: data packs + PDF / Excel downloads =================
+PERIOD_LABELS = {None: "All time", 7: "Last 7 days", 14: "Last 14 days", 30: "Last 30 days"}
+LOOKBACK_DAYS = 60            # history the metrics engine looks at (it needs 35 days; 60 leaves headroom)
+MAX_HISTORY_ROWS = 20000
+
+
+def _period(days: Optional[int]):
+    """-> (days|None, label, since|None). Same 7/14/30/all choices as the app's download selector."""
+    if days and days not in ALLOWED_EXPORT_WINDOWS:
+        raise HTTPException(400, f"days must be one of {ALLOWED_EXPORT_WINDOWS}")
+    days = days or None
+    since = (datetime.strptime(_today_str(), "%Y-%m-%d") - timedelta(days=days - 1)).strftime("%Y-%m-%d") if days else None
+    return days, PERIOD_LABELS[days], since
+
+
+def _lookback_start() -> str:
+    return (datetime.strptime(_today_str(), "%Y-%m-%d") - timedelta(days=LOOKBACK_DAYS - 1)).strftime("%Y-%m-%d")
+
+
+def _make_pack(name: str, joined: bool, rows_all: List[dict], gps_all: List[dict], notes: List[dict], since: Optional[str], audience: str) -> dict:
+    """Everything one person's report needs: period rows for the tables/charts, full lookback for the live metrics."""
+    today = _today_str()
+    in_period = lambda r: (not since) or r["date"] >= since
+    pack = {"name": name, "joined": joined, "checkins": [r for r in rows_all if in_period(r)], "gps": [g for g in gps_all if in_period(g)],
+            "notes": [n for n in notes if in_period(n)], "metrics": None, "insights": [], "riskLabel": "Not joined"}
+    if joined:
+        m = metrics_engine.build_metrics(rows_all, gps_all, today)
+        ins = insights_engine.build_insights(m, rows_all, gps_all, today, audience)
+        sev = {i["severity"] for i in ins}
+        pack.update({"metrics": m, "insights": ins, "riskLabel": "Needs attention" if "red" in sev else ("Watch" if "amber" in sev else "Good")})
+    return pack
+
+
+async def _team_packs(team: dict, days: Optional[int], only_player_id: Optional[str] = None, audience: str = "coach") -> List[dict]:
+    """Batch-loads a whole squad in a handful of queries (not 3 per player), then groups in memory."""
+    _, _, since = _period(days)
+    fetch_since = None if not since else min(since, _lookback_start())
+    pq = {"team_id": team["id"]}
+    if only_player_id:
+        pq["id"] = only_player_id
+    players = await _db.team_players.find(pq, {"_id": 0}).sort("name", 1).to_list(500)
+    if only_player_id and not players:
+        raise HTTPException(404, "Player not found")
+    ids = [p["id"] for p in players]
+    cq = {"team_id": team["id"], "context": "team", "team_player_id": {"$in": ids}}
+    if fetch_since:
+        cq["date"] = {"$gte": fetch_since}
+    checkins = await _db.checkins_v2.find(cq, {"_id": 0}).sort("date", 1).to_list(MAX_HISTORY_ROWS)
+    gps = await _db.gps_sessions.find({"team_id": team["id"], "team_player_id": {"$in": ids}}, {"_id": 0}).sort("date", 1).to_list(MAX_HISTORY_ROWS)
+    notes = await _db.player_notes.find({"team_id": team["id"], "team_player_id": {"$in": ids}}, {"_id": 0}).sort("date", -1).to_list(5000)
+    by = lambda rows: {pid: [r for r in rows if r.get("team_player_id") == pid] for pid in ids}
+    c_by, g_by, n_by = by(checkins), by(gps), by(notes)
+    return [_make_pack(p["name"], bool(p.get("claimed_at")), c_by[p["id"]], g_by[p["id"]], n_by[p["id"]], since, audience) for p in players]
+
+
+async def _individual_pack(athlete: dict, days: Optional[int], audience: str = "athlete") -> dict:
+    _, _, since = _period(days)
+    q = {"athlete_id": athlete["id"], "context": "individual"}
+    fetch_since = None if not since else min(since, _lookback_start())
+    if fetch_since:
+        q["date"] = {"$gte": fetch_since}
+    rows = await _db.checkins_v2.find(q, {"_id": 0}).sort("date", 1).to_list(MAX_HISTORY_ROWS)
+    return _make_pack(athlete["name"], True, rows, [], [], since, audience)
+
+
+def _attachment(name: str, ext: str) -> dict:
+    clean = re.sub(r"[^\w\- ]+", "", name or "", flags=re.UNICODE).strip().replace(" ", "-") or "report"
+    ascii_name = clean.encode("ascii", "ignore").decode() or "report"      # header values must be latin-1; keep a UTF-8 copy too
+    return {"Content-Disposition": f"attachment; filename=\"{ascii_name}.{ext}\"; filename*=UTF-8''{urlquote(clean)}.{ext}"}
+
+
+PDF, XLSX = "application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@platform_router.get("/checkin/export/pdf")
+async def export_individual_pdf(days: Optional[int] = None, athlete: dict = Depends(get_current_athlete)):
+    d, label, _ = _period(days)
+    pack = await _individual_pack(athlete, d, "athlete")
+    return Response(content=reports.build_player_pdf(None, pack, label, d, "athlete"), media_type=PDF, headers=_attachment(f"{athlete['name']}-report", "pdf"))
+
+
+@platform_router.get("/checkin/team/export/pdf")
+async def export_team_athlete_pdf(days: Optional[int] = None, player: dict = Depends(get_current_team_athlete)):
+    d, label, _ = _period(days)
+    team = await _db.teams.find_one({"id": player["team_id"]}, {"_id": 0})
+    pack = (await _team_packs(team, d, only_player_id=player["id"], audience="athlete"))[0]
+    return Response(content=reports.build_player_pdf(team["team_name"], pack, label, d, "athlete"), media_type=PDF, headers=_attachment(f"{player['name']}-report", "pdf"))
+
+
+@platform_router.get("/team/export/pdf")
+async def export_team_pdf(days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    """The complete squad report: summary + a full section (metrics, insights, charts, every check-in, every GPS session) per player."""
+    team = await _admins_team(admin, team_id)
+    d, label, _ = _period(days)
+    packs = await _team_packs(team, d)
+    return Response(content=reports.build_team_pdf(team["team_name"], label, d, packs), media_type=PDF, headers=_attachment(f"{team['team_name']}-team-report", "pdf"))
+
+
+@platform_router.get("/team/export/excel")
+async def export_team_excel(days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    d, label, _ = _period(days)
+    packs = await _team_packs(team, d)
+    return Response(content=reports.build_excel(team["team_name"], label, packs), media_type=XLSX, headers=_attachment(f"{team['team_name']}-team-data", "xlsx"))
+
+
+@platform_router.get("/team/player/{player_id}/export/pdf")
+async def export_player_pdf(player_id: str, days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    d, label, _ = _period(days)
+    pack = (await _team_packs(team, d, only_player_id=player_id))[0]
+    return Response(content=reports.build_player_pdf(team["team_name"], pack, label, d, "coach"), media_type=PDF, headers=_attachment(f"{pack['name']}-report", "pdf"))
+
+
+@platform_router.get("/team/player/{player_id}/export/excel")
+async def export_player_excel(player_id: str, days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+    team = await _admins_team(admin, team_id)
+    d, label, _ = _period(days)
+    pack = (await _team_packs(team, d, only_player_id=player_id))[0]
+    return Response(content=reports.build_excel(pack["name"], label, [pack]), media_type=XLSX, headers=_attachment(f"{pack['name']}-data", "xlsx"))
+
+
 @platform_router.get("/team/gps/export/pdf")
 async def export_gps_pdf(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
@@ -1007,16 +1132,6 @@ async def delete_individual_checkin(checkin_id: str, athlete: dict = Depends(get
     return {"message": "Deleted"}
 
 
-@platform_router.get("/checkin/export/pdf")
-async def export_individual_pdf(days: Optional[int] = None, athlete: dict = Depends(get_current_athlete)):
-    query = {"athlete_id": athlete["id"], "context": "individual", **_since_filter(days)}
-    rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
-    label = f"Individual check-in history — last {days} days" if days else "Individual check-in history"
-    pdf = export_utils.generate_history_pdf(athlete["name"], label, rows)
-    return Response(content=pdf, media_type="application/pdf",
-                     headers={"Content-Disposition": f'attachment; filename="{athlete["name"]}-checkins.pdf"'})
-
-
 # ================= Check-ins: team athlete (code-based, no account) =================
 @platform_router.post("/checkin/team")
 async def submit_team_checkin(payload: CheckInPayload, player: dict = Depends(get_current_team_athlete)):
@@ -1061,16 +1176,6 @@ async def delete_team_checkin(checkin_id: str, player: dict = Depends(get_curren
     if result.deleted_count == 0:
         raise HTTPException(404, "Check-in not found")
     return {"message": "Deleted"}
-
-
-@platform_router.get("/checkin/team/export/pdf")
-async def export_team_athlete_pdf(days: Optional[int] = None, player: dict = Depends(get_current_team_athlete)):
-    query = {"team_player_id": player["id"], "context": "team", **_since_filter(days)}
-    rows = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
-    label = f"Team check-in history — last {days} days" if days else "Team check-in history"
-    pdf = export_utils.generate_history_pdf(player["name"], label, rows)
-    return Response(content=pdf, media_type="application/pdf",
-                     headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
 
 
 # ================= Stats (shared math for athlete self-view & admin views) =================
@@ -1162,6 +1267,19 @@ async def my_team_stats(player: dict = Depends(get_current_team_athlete)):
     monotony, strain, ACWR, readiness vs. the previous week, and a daily series to chart."""
     stats = await _compute_stats({"team_player_id": player["id"], "context": "team"}, player["name"])
     stats.pop("todayCheckin", None)  # internal-only field used for risk scoring
+    team = await _db.teams.find_one({"id": player["team_id"]}, {"_id": 0})
+    pack = (await _team_packs(team, 30, only_player_id=player["id"], audience="athlete"))[0]
+    stats.update({"metrics": pack["metrics"], "insights": pack["insights"]})
+    return stats
+
+
+@platform_router.get("/stats/mine")
+async def my_individual_stats(athlete: dict = Depends(get_current_athlete)):
+    """Same 'My stats' picture team athletes get, for individual athletes (no GPS)."""
+    stats = await _compute_stats({"athlete_id": athlete["id"], "context": "individual"}, athlete["name"])
+    stats.pop("todayCheckin", None)
+    pack = await _individual_pack(athlete, 30, "athlete")
+    stats.update({"metrics": pack["metrics"], "insights": pack["insights"]})
     return stats
 
 
@@ -1230,24 +1348,6 @@ async def team_dashboard(team_id: Optional[str] = None, admin: dict = Depends(ge
     return {"team_name": team["team_name"], "summary": {"total": len(out), "checkedIn": checked_in, "flagged": flagged}, "players": out}
 
 
-@platform_router.get("/team/export/pdf")
-async def export_team_pdf(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
-    team = await _admins_team(admin, team_id)
-    dash = await team_dashboard(team_id=team["id"], admin=admin)
-    pdf = export_utils.generate_team_pdf(dash["team_name"], dash["summary"], dash["players"])
-    return Response(content=pdf, media_type="application/pdf",
-                     headers={"Content-Disposition": f'attachment; filename="{dash["team_name"]}-report.pdf"'})
-
-
-@platform_router.get("/team/export/excel")
-async def export_team_excel(team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
-    team = await _admins_team(admin, team_id)
-    dash = await team_dashboard(team_id=team["id"], admin=admin)
-    xlsx = export_utils.generate_team_excel(dash["team_name"], dash["players"])
-    return Response(content=xlsx, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                     headers={"Content-Disposition": f'attachment; filename="{dash["team_name"]}-report.xlsx"'})
-
-
 @platform_router.get("/team/player/{player_id}")
 async def team_player_detail(player_id: str, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     team = await _admins_team(admin, team_id)
@@ -1267,21 +1367,9 @@ async def team_player_detail(player_id: str, team_id: Optional[str] = None, admi
     acked_today = await _db.player_notes.find_one({
         "team_player_id": player_id, "type": "acknowledgment", "date": _today_str(),
     })
-    return {"player": player, "stats": stats, "checkins": checkins, "acknowledgedToday": bool(acked_today), "today": _today_str()}
-
-
-@platform_router.get("/team/player/{player_id}/export/pdf")
-async def export_player_pdf(player_id: str, days: Optional[int] = None, team_id: Optional[str] = None, admin: dict = Depends(get_current_admin)):
-    team = await _admins_team(admin, team_id)
-    player = await _db.team_players.find_one({"id": player_id, "team_id": team["id"]}, {"_id": 0})
-    if not player:
-        raise HTTPException(404, "Player not found")
-    query = {"team_player_id": player_id, "context": "team", **_since_filter(days)}
-    checkins = await _db.checkins_v2.find(query, {"_id": 0}).sort("date", -1).to_list(500)
-    label = f"{team['team_name']} — check-in history — last {days} days" if days else f"{team['team_name']} — check-in history"
-    pdf = export_utils.generate_history_pdf(player["name"], label, checkins)
-    return Response(content=pdf, media_type="application/pdf",
-                     headers={"Content-Disposition": f'attachment; filename="{player["name"]}-checkins.pdf"'})
+    pack = (await _team_packs(team, 30, only_player_id=player_id, audience="coach"))[0]
+    return {"player": player, "stats": stats, "checkins": checkins, "acknowledgedToday": bool(acked_today), "today": _today_str(),
+            "metrics": pack["metrics"], "insights": pack["insights"]}
 
 
 @platform_router.delete("/team/player/{player_id}/checkin/{checkin_id}")
