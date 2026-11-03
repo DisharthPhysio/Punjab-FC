@@ -42,6 +42,12 @@ const EXACT = {
   "Attach a file": "apiErrors.attachFile",
   "Invalid date. Use YYYY-MM-DD.": "apiErrors.invalidDate",
   "This team has reached today's login limit. Please try again tomorrow.": "apiErrors.teamLoginLimit",
+  "Choose a recovery question and give an answer.": "apiErrors.recoveryRequired",
+  "Choose one of the listed questions.": "apiErrors.recoveryBadQuestion",
+  "Your answer is too short.": "apiErrors.recoveryShort",
+  "The email, question or answer doesn't match our records.": "apiErrors.recoveryMismatch",
+  "Too many wrong attempts. Please try again in 30 minutes.": "apiErrors.recoveryLocked",
+  "Your current password is incorrect.": "apiErrors.wrongCurrentPassword",
 };
 
 const PATTERNS = [
