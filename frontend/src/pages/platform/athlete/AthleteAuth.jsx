@@ -6,6 +6,7 @@ import { User } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
+import { RecoveryFields } from "@/components/platform/RecoveryFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,8 @@ export default function AthleteAuth() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -27,7 +30,8 @@ export default function AthleteAuth() {
     const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "signup") {
-        const res = await apiV2.post("/athlete/signup", { name: name.trim(), email: cleanEmail, password });
+        if (!question) { toast.error(t("apiErrors.recoveryRequired")); setSubmitting(false); return; }
+        const res = await apiV2.post("/athlete/signup", { name: name.trim(), email: cleanEmail, password, recovery_question: question, recovery_answer: answer });
         await login("athlete", res.data.token, res.data.athlete);
       } else {
         const res = await apiV2.post("/athlete/login", { email: cleanEmail, password });
@@ -76,6 +80,7 @@ export default function AthleteAuth() {
           </div>
           <Input id="a-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="athlete-password" />
         </div>
+        {mode === "signup" && <RecoveryFields question={question} answer={answer} onQuestion={setQuestion} onAnswer={setAnswer} idPrefix="athlete" />}
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="athlete-submit">
           {submitting ? t("common.pleaseWait") : mode === "signup" ? t("athleteAuth.createAccount") : t("athleteAuth.login")}
         </Button>

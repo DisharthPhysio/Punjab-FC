@@ -8,7 +8,9 @@ import { AuthShell } from "@/components/platform/AuthShell";
 import { CheckInForm } from "@/components/platform/CheckInForm";
 import { CheckInHistory } from "@/components/platform/CheckInHistory";
 import { ExportButtons } from "@/components/platform/ExportButtons";
+import { StatsView } from "@/components/platform/StatsView";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 
 export default function IndividualCheckIn() {
@@ -60,40 +62,57 @@ export default function IndividualCheckIn() {
 
   return (
     <AuthShell icon={ClipboardList} title={t("individualCheckIn.title")} subtitle={t("individualCheckIn.subtitle")} exitConfirm maxWidth="max-w-xl">
-      <div className="space-y-8">
-        {checkins === null ? (
-          <div className="grid place-items-center py-10">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        ) : editing ? (
-          <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel={t("checkIn.saveChanges")} />
-        ) : today ? (
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
-            <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-            <p className="font-bold">{t("individualCheckIn.doneTitle")}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{t("individualCheckIn.doneSubtitle")}</p>
-            <Button variant="outline" size="sm" className="mt-4 gap-1.5" onClick={() => setEditing(today)} data-testid="edit-today-checkin">
-              <Pencil className="h-3.5 w-3.5" /> {t("individualCheckIn.editToday")}
-            </Button>
-          </div>
-        ) : (
-          <CheckInForm onSubmit={handleSubmit} />
-        )}
+      <Tabs defaultValue="checkin">
+        <TabsList className="mb-6 grid w-full grid-cols-2">
+          <TabsTrigger value="checkin" data-testid="ind-tab-checkin">{t("teamHub.checkInTab")}</TabsTrigger>
+          <TabsTrigger value="stats" data-testid="ind-tab-stats">{t("teamHub.statsTab")}</TabsTrigger>
+        </TabsList>
 
-        <div>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
-            {checkins?.length > 0 && (
-              <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-checkin-history" showDaysFilter />
+        <TabsContent value="checkin">
+          <div className="space-y-8">
+            {checkins === null ? (
+              <div className="grid place-items-center py-10">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            ) : editing ? (
+              <CheckInForm onSubmit={handleSubmit} initial={editing} submitLabel={t("checkIn.saveChanges")} />
+            ) : today ? (
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
+                <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
+                <p className="font-bold">{t("individualCheckIn.doneTitle")}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{t("individualCheckIn.doneSubtitle")}</p>
+                <Button variant="outline" size="sm" className="mt-4 gap-1.5" onClick={() => setEditing(today)} data-testid="edit-today-checkin">
+                  <Pencil className="h-3.5 w-3.5" /> {t("individualCheckIn.editToday")}
+                </Button>
+              </div>
+            ) : (
+              <CheckInForm onSubmit={handleSubmit} />
             )}
+
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("history.title")}</h3>
+                {checkins?.length > 0 && (
+                  <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-checkin-history" showDaysFilter />
+                )}
+              </div>
+              <CheckInHistory
+                checkins={checkins || []}
+                onEdit={(c) => setEditing(c)}
+                onDelete={handleDelete}
+              />
+            </div>
           </div>
-          <CheckInHistory
-            checkins={checkins || []}
-            onEdit={(c) => setEditing(c)}
-            onDelete={handleDelete}
-          />
-        </div>
-      </div>
+        </TabsContent>
+
+        <TabsContent value="stats">
+          <StatsView endpoint="/stats/mine">
+            <div className="flex justify-end">
+              <ExportButtons pdfUrl="/checkin/export/pdf" filename="my-report" showDaysFilter />
+            </div>
+          </StatsView>
+        </TabsContent>
+      </Tabs>
     </AuthShell>
   );
 }

@@ -107,7 +107,11 @@ export default function TeamHub() {
         </TabsContent>
 
         <TabsContent value="stats">
-          <StatsView />
+          <StatsView endpoint="/stats/team/mine">
+            <div className="flex justify-end">
+              <ExportButtons pdfUrl="/checkin/team/export/pdf" filename="my-report" showDaysFilter />
+            </div>
+          </StatsView>
         </TabsContent>
       </Tabs>
     </AuthShell>
