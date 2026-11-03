@@ -1,5 +1,6 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { PlatformAuthProvider, usePlatformAuth } from "@/context/PlatformAuthContext";
@@ -12,7 +13,9 @@ import CoachDashboard from "@/pages/CoachDashboard";
 // new platform
 import Landing from "@/pages/platform/Landing";
 import ForgotPassword from "@/pages/platform/ForgotPassword";
-import ResetPassword from "@/pages/platform/ResetPassword";
+import AccountRecovery from "@/pages/platform/AccountRecovery";
+import { NavigationGuard } from "@/components/platform/NavigationGuard";
+import { Button } from "@/components/ui/button";
 import AthleteEntry from "@/pages/platform/athlete/AthleteEntry";
 import AthleteAuth from "@/pages/platform/athlete/AthleteAuth";
 import IndividualCheckIn from "@/pages/platform/athlete/IndividualCheckIn";
@@ -39,6 +42,29 @@ function Spinner() {
   );
 }
 
+/** The server could not be reached (asleep, offline). The saved login is kept: just offer a retry. */
+function ConnectionRetry() {
+  const { t } = useTranslation();
+  const { refresh } = usePlatformAuth();
+  return (
+    <div className="grid min-h-screen place-items-center bg-background px-6 text-center">
+      <div className="max-w-xs space-y-4">
+        <p className="text-lg font-bold">{t("connection.title")}</p>
+        <p className="text-sm text-muted-foreground">{t("connection.desc")}</p>
+        <Button onClick={refresh} data-testid="connection-retry">{t("connection.retry")}</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Accounts made before recovery questions existed are asked ONCE after login, then never again. */
+function RecoveryGate({ children }) {
+  const { hasRecovery } = usePlatformAuth();
+  const { pathname } = useLocation();
+  if (!hasRecovery && pathname !== "/account/recovery") return <Navigate to="/account/recovery" replace />;
+  return children;
+}
+
 function LegacyProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading || user === null) return <Spinner />;
@@ -47,24 +73,36 @@ function LegacyProtectedRoute({ children }) {
 }
 
 function AthleteRoute({ children }) {
-  const { role, user, loading } = usePlatformAuth();
+  const { role, user, loading, connectionError } = usePlatformAuth();
   if (loading || user === null) return <Spinner />;
+  if (connectionError && localStorage.getItem("pfc_token")) return <ConnectionRetry />;
   if (!user || role !== "athlete") return <Navigate to="/athlete/individual" replace />;
-  return children;
+  return <RecoveryGate>{children}</RecoveryGate>;
 }
 
 function TeamAthleteRoute({ children }) {
-  const { role, user, loading } = usePlatformAuth();
+  const { role, user, loading, connectionError } = usePlatformAuth();
   if (loading || user === null) return <Spinner />;
+  if (connectionError && localStorage.getItem("pfc_token")) return <ConnectionRetry />;
   if (!user || role !== "team_athlete") return <Navigate to="/athlete/join-team" replace />;
   return children;
 }
 
 function AdminRoute({ children, requireTeam = false }) {
-  const { role, user, teams, loading } = usePlatformAuth();
+  const { role, user, teams, loading, connectionError } = usePlatformAuth();
   if (loading || user === null) return <Spinner />;
+  if (connectionError && localStorage.getItem("pfc_token")) return <ConnectionRetry />;
   if (!user || role !== "admin") return <Navigate to="/team/admin-auth" replace />;
   if (requireTeam && (!teams || teams.length === 0)) return <Navigate to="/team/link-code" replace />;
+  return <RecoveryGate>{children}</RecoveryGate>;
+}
+
+/** The one-time recovery-question screen: any logged-in athlete or coach. */
+function AccountRoute({ children }) {
+  const { role, user, loading, connectionError } = usePlatformAuth();
+  if (loading || user === null) return <Spinner />;
+  if (connectionError && localStorage.getItem("pfc_token")) return <ConnectionRetry />;
+  if (!user || !["athlete", "admin"].includes(role)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -74,11 +112,13 @@ function App() {
       <AuthProvider>
         <PlatformAuthProvider>
           <BrowserRouter>
+            <NavigationGuard />
             <Routes>
               {/* ---- new platform (root) ---- */}
               <Route path="/" element={<Landing />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} />
+              <Route path="/account/recovery" element={<AccountRoute><AccountRecovery /></AccountRoute>} />
 
               <Route path="/athlete" element={<AthleteEntry />} />
               <Route path="/athlete/individual" element={<AthleteAuth />} />
