@@ -49,7 +49,7 @@ CHECKIN = {"sleepQuality": 4, "hydration": 4, "motivation": 4, "sessionType": "T
 
 
 async def make_team(client, email="coach@x.com", pw="secret1", name="Punjab FC"):
-    r = await client.post("/api/v2/team/register", json={"email": email, "password": pw, "team_name": name})
+    r = await client.post("/api/v2/team/register", json={"email": email, "password": pw, "team_name": name, "recovery_question": "birth_date", "recovery_answer": "12/05/2000"})
     return r
 
 
@@ -180,7 +180,7 @@ async def test_team_login_cap_and_individual_unlimited(env, monkeypatch):
 
     # individual athletes: no cap at all (well past 3)
     for i in range(12):
-        r = await c.post("/api/v2/athlete/signup", json={"name": f"A{i}", "email": f"a{i}@x.com", "password": "secret1"})
+        r = await c.post("/api/v2/athlete/signup", json={"name": f"A{i}", "email": f"a{i}@x.com", "password": "secret1", "recovery_question": "first_pet", "recovery_answer": "Rocky"})
         assert r.status_code == 200
         assert (await c.post("/api/v2/athlete/login", json={"email": f"a{i}@x.com", "password": "secret1"})).status_code == 200
 
