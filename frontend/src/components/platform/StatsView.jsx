@@ -1,38 +1,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { TrendingUp, TrendingDown, Minus, Gauge } from "lucide-react";
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { formatDay } from "@/lib/dates";
+import { CoachMetrics, AthleteMetrics, InsightsList } from "@/components/platform/Metrics";
 
-const riskCls = (risk) =>
-  risk === "red" ? "text-rose-500 border-rose-500/40 bg-rose-500/10"
-  : risk === "amber" ? "text-amber-500 border-amber-500/40 bg-amber-500/10"
-  : risk === "green" ? "text-emerald-500 border-emerald-500/40 bg-emerald-500/10"
-  : "border-border bg-card";
-
-const MetricCard = ({ label, value, sub, risk }) => (
-  <div className={`rounded-2xl border p-4 ${riskCls(risk)}`}>
-    <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
-    <p className="mt-1 font-mono text-2xl font-extrabold">{value}</p>
-    {sub && <div className="mt-0.5 text-xs opacity-70">{sub}</div>}
-  </div>
-);
-
-const TrendBadge = ({ delta, suffix = "" }) => {
-  const { t } = useTranslation();
-  if (delta == null) return <span className="text-xs text-muted-foreground">{t("stats.noPriorData")}</span>;
-  const Icon = delta > 0 ? TrendingUp : delta < 0 ? TrendingDown : Minus;
-  const cls = delta > 0 ? "text-emerald-500" : delta < 0 ? "text-rose-500" : "text-muted-foreground";
-  return (
-    <span className={`inline-flex items-center gap-1 text-xs font-bold ${cls}`}>
-      <Icon className="h-3 w-3" />{delta > 0 ? "+" : ""}{delta}{suffix} {t("stats.vsLastWeek")}
-    </span>
-  );
-};
-
-export function StatsDisplay({ stats }) {
+export function StatsDisplay({ stats, audience = "athlete" }) {
   const { t, i18n } = useTranslation();
   const chartData = stats.dailySeries.map((d) => ({
     ...d,
@@ -41,32 +15,8 @@ export function StatsDisplay({ stats }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <MetricCard label={t("stats.avgLoad")} value={stats.avgLoad} sub={t("stats.last28")} />
-        <MetricCard label={t("stats.peakLoad")} value={stats.peakLoad} sub={t("stats.last28")} />
-        <MetricCard label={t("stats.weekTotal")} value={stats.weekLoad} sub={<TrendBadge delta={stats.weekChangePct} suffix="%" />} />
-        <MetricCard label={t("stats.monotony")} value={stats.monotony ?? "—"} risk={stats.monotonyRisk} sub={t("stats.fosterWeek")} />
-        <MetricCard label={t("stats.strain")} value={stats.strain ?? "—"} risk={stats.monotonyRisk} sub={t("stats.loadTimesMonotony")} />
-        <MetricCard label="ACWR" value={stats.acwr ?? "—"} risk={stats.acwrRisk} sub={t("stats.acuteChronic")} />
-      </div>
-
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-bold">{t("stats.readiness")}</p>
-            <p className="text-xs text-muted-foreground">{t("stats.readinessDesc")}</p>
-          </div>
-          <div className="text-right">
-            <p className="font-mono text-2xl font-extrabold">{stats.readinessWeekAvg ?? "—"}</p>
-            <TrendBadge delta={stats.readinessTrend} />
-          </div>
-        </div>
-        {stats.readinessToday != null && (
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-            <Gauge className="h-3 w-3" /> {t("stats.todayReadiness", { score: stats.readinessToday })}
-          </div>
-        )}
-      </div>
+      {stats.metrics && (audience === "coach" ? <CoachMetrics m={stats.metrics} /> : <AthleteMetrics m={stats.metrics} />)}
+      <InsightsList insights={stats.insights} />
 
       <div className="rounded-2xl border border-border bg-card p-5">
         <p className="mb-4 text-sm font-bold">{t("stats.dailyChart")}</p>
@@ -88,16 +38,17 @@ export function StatsDisplay({ stats }) {
   );
 }
 
-export function StatsView() {
+/** endpoint: "/stats/team/mine" (team athlete) or "/stats/mine" (individual athlete). */
+export function StatsView({ endpoint = "/stats/team/mine", children }) {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
     let active = true;
-    apiV2.get("/stats/team/mine")
+    apiV2.get(endpoint)
       .then((res) => active && setStats(res.data))
       .catch((err) => toast.error(formatApiError(err?.response?.data?.detail)));
     return () => { active = false; };
-  }, []);
+  }, [endpoint]);
 
   if (!stats) {
     return (
@@ -107,5 +58,10 @@ export function StatsView() {
     );
   }
 
-  return <StatsDisplay stats={stats} />;
+  return (
+    <div className="space-y-4">
+      {children}
+      <StatsDisplay stats={stats} audience="athlete" />
+    </div>
+  );
 }

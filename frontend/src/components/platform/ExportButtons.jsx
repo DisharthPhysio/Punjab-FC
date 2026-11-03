@@ -40,8 +40,8 @@ export function ExportButtons({ pdfUrl, excelUrl, filename, canShare = true, sho
     setBusy(kind);
     try {
       const url = kind === "excel" ? excelUrl : pdfUrl;
-      const blob = await fetchBlob(url, kind === "pdf" ? params : undefined);
-      triggerDownload(blob, kind === "excel" ? `${filename}.xlsx` : `${filename}${suffix}.pdf`);
+      const blob = await fetchBlob(url, params);
+      triggerDownload(blob, kind === "excel" ? `${filename}${suffix}.xlsx` : `${filename}${suffix}.pdf`);
     } catch (err) {
       toast.error(formatApiError(err?.response?.data?.detail) || t("export.couldntGenerate"));
     } finally {

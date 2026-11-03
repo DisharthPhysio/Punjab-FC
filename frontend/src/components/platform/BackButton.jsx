@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
+import { previousPath, currentIdx } from "@/lib/navHistory";
 
 /** Back arrow, present on every platform page (item 9).
  * Always navigates to a fixed, known destination -- deliberately NOT using
@@ -15,7 +16,9 @@ export function BackButton({ to = "/", label }) {
   return (
     <button
       type="button"
-      onClick={() => navigate(to)}
+      // Same rule as the phone's Back key: if the page above us is already the previous history entry just step
+      // back to it, otherwise replace this page with it. Either way history never piles up in reverse order.
+      onClick={() => (previousPath(currentIdx()) === to ? navigate(-1) : navigate(to, { replace: true }))}
       data-testid="back-button"
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-primary/50"
     >
