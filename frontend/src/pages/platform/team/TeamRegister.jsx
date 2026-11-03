@@ -6,6 +6,7 @@ import { PlusCircle } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
+import { RecoveryFields } from "@/components/platform/RecoveryFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,8 @@ export default function TeamRegister() {
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -24,7 +27,7 @@ export default function TeamRegister() {
     setSubmitting(true);
     const cleanEmail = email.trim().toLowerCase();
     try {
-      const res = await apiV2.post("/team/register", { team_name: teamName.trim(), email: cleanEmail, password });
+      const res = await apiV2.post("/team/register", { team_name: teamName.trim(), email: cleanEmail, password, recovery_question: question || undefined, recovery_answer: answer || undefined });
       await login("admin", res.data.token, res.data.admin, { teamId: res.data.team?.id });
       navigate("/team/roster-setup", { replace: true });
     } catch (err) {
@@ -49,6 +52,7 @@ export default function TeamRegister() {
           <Label htmlFor="t-pass">{t("athleteAuth.password")}</Label>
           <Input id="t-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="team-password-input" />
         </div>
+        <RecoveryFields question={question} answer={answer} onQuestion={setQuestion} onAnswer={setAnswer} idPrefix="team" required={false} note={t("recovery.existingAccountNote")} />
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="team-register-submit">
           {submitting ? t("teamRegister.creating") : t("teamRegister.create")}
         </Button>

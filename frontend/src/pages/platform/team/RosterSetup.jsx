@@ -85,7 +85,7 @@ export default function RosterSetup() {
         {t("roster.loginNote")}
       </p>
 
-      <Button className="w-full" size="lg" onClick={() => navigate("/team/home")} data-testid="roster-continue">
+      <Button className="w-full" size="lg" onClick={() => navigate("/team/home", { replace: true })} data-testid="roster-continue">
         {players.length > 0 ? t("common.continue") : t("roster.skip")}
       </Button>
     </AuthShell>

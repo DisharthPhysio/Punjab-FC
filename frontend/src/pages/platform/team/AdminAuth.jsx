@@ -6,6 +6,7 @@ import { ShieldCheck } from "lucide-react";
 import apiV2, { formatApiError } from "@/lib/apiV2";
 import { usePlatformAuth } from "@/context/PlatformAuthContext";
 import { AuthShell } from "@/components/platform/AuthShell";
+import { RecoveryFields } from "@/components/platform/RecoveryFields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,8 @@ export default function AdminAuth() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -26,7 +29,8 @@ export default function AdminAuth() {
     const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "signup") {
-        const res = await apiV2.post("/admin/signup", { email: cleanEmail, password });
+        if (!question) { toast.error(t("apiErrors.recoveryRequired")); setSubmitting(false); return; }
+        const res = await apiV2.post("/admin/signup", { email: cleanEmail, password, recovery_question: question, recovery_answer: answer });
         await login("admin", res.data.token, res.data.admin);
         navigate("/team/link-code", { replace: true });
       } else {
@@ -72,6 +76,7 @@ export default function AdminAuth() {
           </div>
           <Input id="ad-pass" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("athleteAuth.passwordPlaceholder")} data-testid="admin-password" />
         </div>
+        {mode === "signup" && <RecoveryFields question={question} answer={answer} onQuestion={setQuestion} onAnswer={setAnswer} idPrefix="admin" />}
         <Button className="w-full" size="lg" type="submit" disabled={submitting} data-testid="admin-submit">
           {submitting ? t("common.pleaseWait") : mode === "signup" ? t("athleteAuth.createAccount") : t("athleteAuth.login")}
         </Button>

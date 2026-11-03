@@ -165,13 +165,13 @@ export default function PlayerDetail() {
               </div>
             )}
 
-            {stats && <StatsDisplay stats={stats} />}
+            {stats && <StatsDisplay stats={{ ...stats, metrics: data.metrics, insights: data.insights }} audience="coach" />}
 
             <div>
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">{t("player.recentCheckins")}</h3>
                 {checkins?.length > 0 && (
-                  <ExportButtons pdfUrl={`/team/player/${playerId}/export/pdf`} filename={`${player.name}-checkins`} canShare={false} showDaysFilter />
+                  <ExportButtons pdfUrl={`/team/player/${playerId}/export/pdf`} excelUrl={`/team/player/${playerId}/export/excel`} filename={`${player.name}-report`} canShare={false} showDaysFilter />
                 )}
               </div>
               <CheckInHistory checkins={checkins} emptyLabel={t("player.noCheckins")} onDelete={deleteCheckin} />

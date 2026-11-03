@@ -239,7 +239,7 @@ export default function TeamHome() {
             <CalendarDays className="h-4 w-4" /> {t("teamHome.dayByDay")}
           </Button>
           {dash && (
-            <ExportButtons pdfUrl="/team/export/pdf" excelUrl="/team/export/excel" filename={`${dash.team_name}-report`} canShare={false} />
+            <ExportButtons pdfUrl="/team/export/pdf" excelUrl="/team/export/excel" filename={`${dash.team_name}-team-report`} canShare={false} showDaysFilter />
           )}
         </div>
 
